@@ -135,6 +135,11 @@ export default {
 						});
 					}
 					
+					if (isClassicClashClient(userAgent, url)) {
+						const clashYaml = generateClassicClashUnsupportedConfig(host);
+						return createSubscriptionResponse(clashYaml, 'text/yaml;charset=utf-8', 'clash-classic-unsupported.yaml', now, today, timestamp);
+					}
+
 					if (isClashLikeClient(userAgent, url)) {
 						const clashYaml = await generateClashConfig(userID, host, sub, RproxyIP, effectiveADD, effectiveDLS);
 						return createSubscriptionResponse(clashYaml, 'text/yaml;charset=utf-8', 'clash.yaml', now, today, timestamp);
@@ -149,8 +154,8 @@ export default {
 					if (userAgent && userAgent.includes('mozilla')){
 						// Build subscription URLs
 						const baseUrl = `http://${host}/`;
-						const clashUrl = `${baseUrl}?clash=vmess`;
-						const singboxUrl = `${baseUrl}?singbox=vmess`;
+						const clashUrl = baseUrl;
+						const singboxUrl = `${baseUrl}?singbox`;
 						const vlessLink = `vless://${userID}@${host}:443?encryption=none&security=tls&sni=${host}&fp=randomized&type=ws&host=${host}&path=%2F%3Fed%3D2048#${host}`;
 						
 						const html = `<!DOCTYPE html>
@@ -495,7 +500,7 @@ body{
   function updateUrl(){
     var add=encodeURIComponent(document.getElementById('addInput').value);
     var dls=document.getElementById('dlsInput').value;
-    var params='?clash=vmess';
+    var params='?clash-meta';
     if(add)params+='&ADD='+add;
     if(dls&&parseFloat(dls)>0)params+='&DLS='+dls;
     var url='https://'+HOST+'/'+UUID+params;
@@ -604,9 +609,20 @@ body{
  * @param {import("@cloudflare/workers-types").Request} request
  */
 function isClashLikeClient(userAgent, url) {
-	if (url.searchParams.has('clash')) return true;
+	if (url.searchParams.has('clash-meta') || url.searchParams.has('mihomo')) return true;
+	if (url.searchParams.has('clash') && !isClassicClashClient(userAgent, url)) return true;
 	if (!userAgent || userAgent.includes('mozilla')) return false;
-	return ['clash', 'mihomo', 'sparkle', 'verge', 'clashmeta', 'nyanpasu', 'cfw'].some(token => userAgent.includes(token));
+	return ['mihomo', 'sparkle', 'clashmeta', 'clash.meta', 'meta', 'nyanpasu'].some(token => userAgent.includes(token));
+}
+
+function isClassicClashClient(userAgent, url) {
+	if (url.searchParams.has('clash-classic')) return true;
+	if (url.searchParams.has('clash-meta') || url.searchParams.has('mihomo')) return false;
+	if (!userAgent || userAgent.includes('mozilla')) return false;
+	const ua = userAgent.toLowerCase();
+	const isMeta = ['mihomo', 'sparkle', 'clashmeta', 'clash.meta', 'meta', 'nyanpasu'].some(token => ua.includes(token));
+	if (isMeta) return false;
+	return ua.includes('clash') || ua.includes('cfw') || ua.includes('clashforwindows');
 }
 
 function isSingboxClient(userAgent, url) {
@@ -636,6 +652,9 @@ async function handleSubscriptionRequest(url, userAgent, userID, host, sub, Rpro
 	const urlDLS = parseFloat(url.searchParams.get('DLS')) || 0;
 	if (isSingboxClient(userAgent, url)) {
 		return createSubscriptionResponse(generateSingboxConfig(userID, host), 'application/json;charset=utf-8', 'singbox.json', now, today, timestamp);
+	}
+	if (isClassicClashClient(userAgent, url)) {
+		return createSubscriptionResponse(generateClassicClashUnsupportedConfig(host), 'text/yaml;charset=utf-8', 'clash-classic-unsupported.yaml', now, today, timestamp);
 	}
 	if (isClashLikeClient(userAgent, url)) {
 		return createSubscriptionResponse(await generateClashConfig(userID, host, sub, RproxyIP, urlADD, urlDLS), 'text/yaml;charset=utf-8', 'clash.yaml', now, today, timestamp);
@@ -1708,6 +1727,31 @@ async function withTimeout(promise, timeoutMs, fallbackValue) {
 function buildProxyNameList(proxies) {
 	if (!proxies.length) return '      - DIRECT';
 	return proxies.map(p => `      - "${p.name}"`).join('\n');
+}
+
+function generateClassicClashUnsupportedConfig(hostName) {
+	return `mixed-port: 7890
+allow-lan: false
+mode: rule
+log-level: info
+
+proxies: []
+
+proxy-groups:
+  - name: "PROXY"
+    type: select
+    proxies:
+      - DIRECT
+
+rules:
+  - MATCH,DIRECT
+
+# This subscription uses VLESS over WebSocket TLS.
+# Clash Classic does not support VLESS and will report:
+# proxy 0: unsupport proxy type vless
+# Use Sparkle, Mihomo, Clash.Meta, Clash Verge Rev, NekoRay, v2rayN, or sing-box instead.
+# Subscription: http://${hostName}/
+`;
 }
 
 async function generateClashConfig(userID, hostName, sub, RproxyIP, urlADD, urlDLS) {
