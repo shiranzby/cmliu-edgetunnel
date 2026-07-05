@@ -185,143 +185,224 @@ export default {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Edgetunnel · 订阅管理</title>
+<script src="https://cdn.jsdelivr.net/npm/@keeex/qrcodejs-kx@1.0.2/qrcode.min.js"></script>
 <style>
 :root {
-  --bg: #f4f8fd;
-  --card-bg: #ffffff;
-  --card-border: #e2e8f0;
-  --text-primary: #1e293b;
-  --text-secondary: #64748b;
-  --text-muted: #94a3b8;
-  --accent: #2563eb;
-  --accent-light: #3b82f6;
-  --accent-bg: #eff6ff;
-  --accent-border: #bfdbfe;
-  --success: #16a34a;
-  --success-bg: #f0fdf4;
-  --warning: #ea580c;
-  --shadow: 0 1px 3px 0 rgba(0,0,0,.06), 0 1px 2px -1px rgba(0,0,0,.04);
-  --shadow-md: 0 4px 6px -1px rgba(0,0,0,.06), 0 2px 4px -2px rgba(0,0,0,.04);
-  --radius: 12px;
+  --bg:#f6f8fb;
+  --card:#ffffff;
+  --line:#e7edf5;
+  --soft:#f8fafc;
+  --text:#172033;
+  --muted:#6b7688;
+  --sub:#99a5b8;
+  --blue:#2563eb;
+  --blue-light:#3b82f6;
+  --blue-soft:#eff6ff;
+  --blue-line:#bfdbfe;
+  --green:#16a34a;
+  --green-soft:#f0fdf4;
+  --orange:#f59e0b;
+  --violet:#8b5cf6;
+  --cyan:#0ea5e9;
+  --shadow:0 12px 28px rgba(15,23,42,.06);
+  --shadow-hover:0 18px 38px rgba(15,23,42,.1);
+  --r:12px;
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 body{
   font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'Noto Sans SC',sans-serif;
-  background:linear-gradient(180deg,#eef4ff 0%,#e4ecf9 30%,#f4f8fd 100%);
-  min-height:100vh;color:var(--text-primary);line-height:1.6;
+  background:var(--bg);color:var(--text);line-height:1.55;min-height:100vh;
 }
-.container{max-width:720px;width:100%;margin:0 auto;padding:24px 16px}
+.container{max-width:720px;width:100%;margin:0 auto;padding:20px 16px}
+
+/* Top bar */
+.topbar{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  background:linear-gradient(135deg,#2563eb,#1d4ed8);
+  border-radius:var(--r);padding:14px 18px;margin-bottom:16px;
+  box-shadow:0 8px 22px -6px rgba(37,99,235,.28);
+}
+.topbar .brand{display:flex;align-items:center;gap:10px;color:#fff}
+.topbar .brand-ico{width:34px;height:34px;border-radius:8px;background:rgba(255,255,255,.18);display:grid;place-items:center;font-size:16px}
+.topbar .brand-text{display:flex;flex-direction:column;line-height:1.1}
+.topbar .brand-text strong{font-size:17px;font-weight:800;letter-spacing:-.3px}
+.topbar .brand-text small{font-size:11px;opacity:.82;font-weight:500}
+.topbar .badges{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.topbar .badge{font-size:10px;padding:3px 10px;border-radius:20px;background:rgba(255,255,255,.16);color:#fff;border:1px solid rgba(255,255,255,.22);font-weight:600;white-space:nowrap}
+
+/* Card */
 .card{
-  background:var(--card-bg);border-radius:var(--radius);padding:20px;
-  margin-bottom:16px;border:1px solid var(--card-border);box-shadow:var(--shadow);
-  transition:box-shadow .2s;
+  background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+  box-shadow:var(--shadow);padding:16px;margin-bottom:14px;
+  transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease;
 }
-.card:hover{box-shadow:var(--shadow-md)}
-.header{
-  text-align:center;padding:32px 20px 20px;
-  background:linear-gradient(135deg,#2563eb,#1d4ed8);border-radius:var(--radius);
-  margin-bottom:20px;color:#fff;box-shadow:0 4px 14px -4px rgba(37,99,235,.3);
+.card:hover{transform:translateY(-2px);box-shadow:var(--shadow-hover);border-color:color-mix(in srgb,var(--line) 55%,var(--blue))}
+
+/* Section title */
+.section-title{
+  font-size:13px;font-weight:800;color:var(--text);margin-bottom:12px;
+  display:flex;align-items:center;gap:8px;letter-spacing:-.2px;
 }
-.header .icon{font-size:32px;margin-bottom:8px}
-.header h1{font-size:22px;font-weight:700;letter-spacing:-.5px}
-.header p{font-size:13px;opacity:.85;margin-top:4px}
-.status-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
-@media(min-width:500px){.status-grid{grid-template-columns:repeat(4,1fr)}}
-.status-item{background:var(--accent-bg);border-radius:8px;padding:12px;border:1px solid var(--accent-border)}
-.status-item .label{font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px}
-.status-item .value{font-size:13px;font-weight:600;color:var(--accent);font-family:'SF Mono','Fira Code','Consolas',monospace;word-break:break-all}
-.section-title{font-size:14px;font-weight:600;color:var(--text-primary);margin-bottom:12px;display:flex;align-items:center;gap:8px}
-.section-title::before{content:'';width:3px;height:16px;background:var(--accent);border-radius:2px;flex-shrink:0}
-.sub-url-box{background:var(--accent-bg);border:1px solid var(--accent-border);border-radius:8px;padding:14px;margin-bottom:12px}
-.sub-url-box .url{font-family:'SF Mono','Fira Code','Consolas',monospace;font-size:12px;color:var(--accent);word-break:break-all;line-height:1.6}
-.sub-url-box .hint{font-size:11px;color:var(--text-muted);margin-top:6px;display:flex;align-items:center;gap:4px}
-.format-tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
-.format-tag{font-size:10px;padding:3px 10px;border-radius:12px;background:#fff;border:1px solid var(--accent-border);color:var(--text-secondary)}
+.section-title::before{content:'';width:3px;height:14px;background:var(--blue);border-radius:2px}
+
+/* Stat grid */
+.stat-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+@media(min-width:540px){.stat-grid{grid-template-columns:repeat(4,1fr)}}
+.stat{
+  display:grid;grid-template-columns:42px minmax(0,1fr);grid-template-rows:auto auto;column-gap:10px;row-gap:2px;
+  background:var(--soft);border:1px solid var(--line);border-radius:10px;padding:10px;
+  transition:background .2s,border-color .2s;
+}
+.stat:hover{background:#fff;border-color:var(--blue-line)}
+.stat-ico{grid-column:1;grid-row:1/3;width:42px;height:42px;border-radius:50%;display:grid;place-items:center;font-size:18px;background:linear-gradient(135deg,#dbe7ff,#a9c2ff);color:var(--blue)}
+.stat-ico.green{background:linear-gradient(135deg,#d8f8e7,#a7ecc7);color:#0f9f62}
+.stat-ico.orange{background:linear-gradient(135deg,#ffe5c7,#ffc38a);color:#d97706}
+.stat-ico.violet{background:linear-gradient(135deg,#eadcff,#d5b9ff);color:#7c3aed}
+.stat-title{grid-column:2;font-size:10px;color:var(--sub);font-weight:700;text-transform:uppercase;letter-spacing:.4px}
+.stat-value{grid-column:2;font-size:13px;font-weight:800;color:var(--text);word-break:break-all;align-self:center}
+
+/* Subscription box */
+.sub-url-box{background:var(--blue-soft);border:1px solid var(--blue-line);border-radius:10px;padding:14px;margin-bottom:10px;transition:background .2s}
+.sub-url-box .url{font-family:'SF Mono','Fira Code','Consolas',monospace;font-size:12px;color:var(--blue);word-break:break-all;line-height:1.55;font-weight:600}
+.sub-url-box .hint{font-size:11px;color:var(--muted);margin-top:6px;display:flex;align-items:center;gap:4px}
+.format-tags{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}
+.format-tag{font-size:10px;padding:3px 10px;border-radius:20px;background:#fff;border:1px solid var(--blue-line);color:var(--muted);font-weight:600}
+#qrcode{
+  display:none;justify-content:center;align-items:center;padding:16px 0 4px;
+}
+#qrcode.active{display:flex}
+#qrcode img,#qrcode canvas{border-radius:10px;padding:8px;background:#fff;border:1px solid var(--blue-line)}
+
+/* Buttons */
 .btn{
-  display:inline-flex;align-items:center;justify-content:center;gap:6px;
-  padding:10px 20px;border:none;border-radius:8px;font-size:13px;font-weight:500;
-  cursor:pointer;transition:all .2s;text-decoration:none;
+  display:inline-flex;align-items:center;justify-content:center;gap:5px;
+  padding:9px 18px;border:none;border-radius:8px;font-size:13px;font-weight:600;
+  cursor:pointer;transition:all .18s;text-decoration:none;
 }
 .btn-primary{background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;box-shadow:0 2px 8px -2px rgba(37,99,235,.3)}
 .btn-primary:hover{background:linear-gradient(135deg,#1d4ed8,#1e40af);box-shadow:0 4px 12px -2px rgba(37,99,235,.4);transform:translateY(-1px)}
-.btn-outline{background:#fff;color:var(--accent);border:1px solid var(--accent-border)}
-.btn-outline:hover{background:var(--accent-bg);border-color:var(--accent)}
+.btn-outline{background:#fff;color:var(--blue);border:1px solid var(--blue-line)}
+.btn-outline:hover{background:var(--blue-soft);border-color:var(--blue);transform:translateY(-1px)}
 .btn-sm{padding:6px 14px;font-size:12px}
-.btn-block{width:100%;justify-content:center}
 .btn-row{display:flex;gap:8px;flex-wrap:wrap}
-.btn.copied{background:var(--success)!important;border-color:var(--success)!important;color:#fff!important}
-.form-group{margin-bottom:12px}.form-group:last-child{margin-bottom:0}
-.form-label{display:block;font-size:12px;font-weight:500;color:var(--text-secondary);margin-bottom:4px}
+.btn.copied{background:var(--green)!important;border-color:var(--green)!important;color:#fff!important}
+
+/* Form */
+.form-group{margin-bottom:10px}.form-group:last-child{margin-bottom:0}
+.form-label{display:block;font-size:12px;font-weight:700;color:var(--muted);margin-bottom:4px}
 .form-input{
-  width:100%;padding:10px 12px;border:1px solid var(--card-border);border-radius:8px;
-  background:#fff;color:var(--text-primary);font-size:13px;
+  width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;
+  background:#fff;color:var(--text);font-size:13px;
   font-family:'SF Mono','Fira Code','Consolas',monospace;outline:none;
   transition:border-color .2s,box-shadow .2s;
 }
-.form-input:focus{border-color:var(--accent-light);box-shadow:0 0 0 3px rgba(37,99,235,.1)}
-.form-input::placeholder{color:var(--text-muted)}
-.form-hint{font-size:11px;color:var(--text-muted);margin-top:4px}
-.node-section{margin-bottom:10px}
+.form-input:focus{border-color:var(--blue-light);box-shadow:0 0 0 3px rgba(37,99,235,.1)}
+.form-input::placeholder{color:var(--sub)}
+.form-hint{font-size:11px;color:var(--sub);margin-top:4px}
+
+/* Node list */
+.node-section{margin-bottom:8px}
 .node-header{
   display:flex;justify-content:space-between;align-items:center;
-  padding:10px 14px;background:var(--accent-bg);border:1px solid var(--accent-border);
-  border-radius:8px;cursor:pointer;user-select:none;transition:background .2s;
+  padding:9px 12px;background:var(--soft);border:1px solid var(--line);
+  border-radius:8px;cursor:pointer;user-select:none;transition:background .2s,border-color .2s;
 }
-.node-header:hover{background:#dbeafe}
-.node-header h3{font-size:13px;font-weight:600;color:var(--text-primary)}
-.badge{font-size:10px;padding:2px 10px;border-radius:10px;font-weight:600}
-.badge-pref{background:#dcfce7;color:var(--success)}
-.badge-fallback{background:var(--accent-bg);color:var(--accent)}
+.node-header:hover{background:#eef4ff;border-color:var(--blue-line)}
+.node-header h3{font-size:12px;font-weight:800;color:var(--text)}
+.badge{font-size:10px;padding:2px 9px;border-radius:10px;font-weight:700}
+.badge-pref{background:var(--green-soft);color:var(--green)}
+.badge-fallback{background:var(--blue-soft);color:var(--blue)}
 .nodelist{
-  max-height:240px;overflow-y:auto;border:1px solid var(--card-border);
-  border-top:none;border-radius:0 0 8px 8px;background:#f8fafc;
+  max-height:260px;overflow-y:auto;border:1px solid var(--line);
+  border-top:none;border-radius:0 0 8px 8px;background:var(--soft);
 }
 .nodelist.collapsed{display:none}
 .node-item{
-  display:flex;justify-content:space-between;padding:6px 14px;font-size:11px;
-  font-family:'SF Mono','Fira Code','Consolas',monospace;color:var(--text-secondary);
-  border-bottom:1px solid #f1f5f9;
+  display:flex;justify-content:space-between;padding:5px 12px;font-size:11px;
+  font-family:'SF Mono','Fira Code','Consolas',monospace;color:var(--muted);
+  border-bottom:1px solid var(--line);
 }
 .node-item:last-child{border-bottom:none}
-.node-item .server{color:var(--accent);font-weight:500}
-.loading{text-align:center;padding:30px;color:var(--text-muted);font-size:13px}
+.node-item .server{color:var(--blue);font-weight:700}
+
+/* Loading / empty / error */
+.loading{text-align:center;padding:24px;color:var(--sub);font-size:12px}
 .loading .spinner{
-  width:20px;height:20px;border:2px solid var(--accent-border);
-  border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite;
-  margin:0 auto 8px;
+  width:18px;height:18px;border:2px solid var(--blue-line);
+  border-top-color:var(--blue);border-radius:50%;animation:spin .6s linear infinite;
+  margin:0 auto 6px;
 }
 @keyframes spin{to{transform:rotate(360deg)}}
-.empty-state{text-align:center;padding:20px;color:var(--text-muted);font-size:12px}
-.empty-state .icon{font-size:28px;margin-bottom:6px;opacity:.6}
-.footer{text-align:center;padding:20px;font-size:11px;color:var(--text-muted)}
-.footer a{color:var(--accent);text-decoration:none}
+.empty-state{text-align:center;padding:18px;color:var(--sub);font-size:12px}
+.empty-state .icon{font-size:26px;margin-bottom:4px;opacity:.55}
+.error-state{text-align:center;padding:18px;color:#dc2626;font-size:12px}
+.retry-btn{
+  margin-top:8px;padding:5px 14px;border:1px solid #fecaca;background:#fef2f2;
+  color:#dc2626;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;
+}
+.retry-btn:hover{background:#fee2e2}
+
+.footer{text-align:center;padding:16px;font-size:11px;color:var(--sub)}
+.footer a{color:var(--blue);text-decoration:none}
 .footer a:hover{text-decoration:underline}
-@media(max-width:480px){.container{padding:12px 8px}.card{padding:14px}.header{padding:24px 16px 16px}}
+
+@media(max-width:480px){
+  .container{padding:12px 10px}
+  .card{padding:13px}
+  .topbar{flex-wrap:wrap}
+  .topbar .badges{width:100%;justify-content:flex-start}
+  .stat-grid{grid-template-columns:repeat(2,1fr)}
+}
 </style>
 </head>
 <body>
 <div class="container">
-  <div class="header">
-    <div class="icon">🔗</div>
-    <h1>Edgetunnel</h1>
-    <p>VLESS over WebSocket · Cloudflare Workers</p>
+  <div class="topbar">
+    <div class="brand">
+      <div class="brand-ico">🔗</div>
+      <div class="brand-text">
+        <strong>Edgetunnel</strong>
+        <small>Cloudflare Workers 节点订阅</small>
+      </div>
+    </div>
+    <div class="badges">
+      <span class="badge">VLESS</span>
+      <span class="badge">WS+TLS</span>
+      <span class="badge">443</span>
+    </div>
   </div>
 
   <div class="card">
     <div class="section-title">服务状态</div>
-    <div class="status-grid">
-      <div class="status-item"><div class="label">UUID</div><div class="value">${userID.slice(0,13)}...</div></div>
-      <div class="status-item"><div class="label">服务器</div><div class="value">${host}</div></div>
-      <div class="status-item"><div class="label">端口 / 传输</div><div class="value">443 · WS+TLS</div></div>
-      <div class="status-item"><div class="label">订阅服务</div><div class="value">${sub || '内置'}</div></div>
+    <div class="status-grid stat-grid">
+      <div class="stat">
+        <div class="stat-ico">🆔</div>
+        <div class="stat-title">UUID</div>
+        <div class="stat-value">${userID.slice(0,13)}...</div>
+      </div>
+      <div class="stat">
+        <div class="stat-ico orange">🌐</div>
+        <div class="stat-title">服务器</div>
+        <div class="stat-value">${host}</div>
+      </div>
+      <div class="stat">
+        <div class="stat-ico green">🔒</div>
+        <div class="stat-title">传输</div>
+        <div class="stat-value">WS · TLS</div>
+      </div>
+      <div class="stat">
+        <div class="stat-ico violet">📡</div>
+        <div class="stat-title">订阅源</div>
+        <div class="stat-value">${sub ? '已配置' : '内置'}</div>
+      </div>
     </div>
   </div>
 
   <div class="card">
     <div class="section-title">订阅链接</div>
-    <div class="sub-url-box">
+    <div class="sub-url-box" id="subBox">
       <div class="url" id="subUrl">${baseUrl}</div>
-      <div class="hint">💡 自动识别客户端：Clash Meta / Sing-box / v2rayN / Shadowrocket 等</div>
+      <div class="hint">💡 自动识别客户端：Clash Meta / Sing-box / v2rayN / Nekoray / Shadowrocket</div>
       <div class="format-tags">
         <span class="format-tag">Clash Meta</span>
         <span class="format-tag">Sing-box</span>
@@ -330,9 +411,10 @@ body{
         <span class="format-tag">Shadowrocket</span>
       </div>
     </div>
+    <div id="qrcode"></div>
     <div class="btn-row">
-      <button class="btn btn-primary" id="copySubBtn">📋 复制订阅链接</button>
-      <button class="btn btn-outline" id="qrBtn">📱 二维码</button>
+      <button class="btn btn-outline" id="toggleQrBtn">📱 二维码</button>
+      <button class="btn btn-primary" id="copySubBtn">📋 复制</button>
     </div>
   </div>
 
@@ -349,10 +431,10 @@ body{
       <div class="form-hint">仅对 CSV 测速数据源生效，低于此速度的节点将被过滤。</div>
     </div>
     <div class="btn-row">
-      <button class="btn btn-primary" id="applyBtn">🔄 刷新节点列表</button>
+      <button class="btn btn-primary" id="applyBtn">🔄 刷新节点</button>
       <button class="btn btn-outline" id="copyClashBtn">📋 复制 Clash 链接</button>
     </div>
-    <div style="margin-top:8px;font-size:11px;color:var(--text-muted);word-break:break-all" id="genUrl"></div>
+    <div style="margin-top:8px;font-size:11px;color:var(--sub);word-break:break-all" id="genUrl"></div>
   </div>
 
   <div class="card">
@@ -375,6 +457,8 @@ body{
   var UUID='${userID}';
   var HOST='${host}';
   var BASE='${baseUrl}';
+  var showQr=false;
+  var qrCode=null;
 
   function copyText(text,btn,orig){
     var origT=orig||btn.textContent;
@@ -395,25 +479,34 @@ body{
     document.body.removeChild(ta)
   }
 
-  document.getElementById('copySubBtn').onclick=function(){
-    copyText(BASE,this,'📋 复制订阅链接')
-  };
+  function renderQr(){
+    var box=document.getElementById('qrcode');
+    var subBox=document.getElementById('subBox');
+    var btn=document.getElementById('toggleQrBtn');
+    if(!showQr){
+      box.classList.remove('active');box.innerHTML='';
+      subBox.style.display='';
+      btn.innerHTML='📱 二维码';
+      return;
+    }
+    subBox.style.display='none';
+    box.classList.add('active');box.innerHTML='';
+    try{
+      qrCode=new QRCode(box,{
+        text:BASE,width:200,height:200,
+        colorDark:'#2563eb',colorLight:'#ffffff',
+        correctLevel:QRCode.CorrectLevel.L
+      });
+    }catch(e){
+      box.innerHTML='<div class="empty-state"><div class="icon">⚠️</div>二维码生成失败</div>';
+    }
+    btn.innerHTML='🔗 订阅链接';
+  }
 
-  document.getElementById('qrBtn').onclick=function(){
-    var exist=document.getElementById('qrModal');
-    if(exist){exist.remove();return}
-    var modal=document.createElement('div');
-    modal.id='qrModal';
-    modal.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:1000';
-    modal.onclick=function(e){if(e.target===modal)modal.remove()};
-    var box=document.createElement('div');
-    box.style.cssText='background:#fff;border-radius:16px;padding:28px;text-align:center;max-width:90vw;box-shadow:0 20px 60px rgba(0,0,0,.12)';
-    box.innerHTML='<h3 style="margin-bottom:16px;font-size:16px;color:#1e293b;font-weight:600">📱 扫描二维码订阅</h3>'+
-      '<img src="https://api.qrserver.com/v1/create-qr-code/?size=220x220&data='+encodeURIComponent(BASE)+'" style="width:220px;height:220px;border-radius:10px;background:#f8fafc" onerror="var fb=document.getElementById(\'qrFallback\');if(fb)fb.style.display=\'block\';this.style.display=\'none\'">'+
-      '<div id="qrFallback" style="display:none;padding:20px;color:#94a3b8;font-size:13px">二维码加载失败<br>请直接复制订阅链接</div>'+
-      '<p style="margin-top:12px;font-size:11px;color:#94a3b8;word-break:break-all">'+BASE+'</p>';
-    modal.appendChild(box);
-    document.body.appendChild(modal)
+  document.getElementById('toggleQrBtn').onclick=function(){showQr=!showQr;renderQr()};
+
+  document.getElementById('copySubBtn').onclick=function(){
+    copyText(BASE,this,'📋 复制')
   };
 
   function updateUrl(){
@@ -427,17 +520,22 @@ body{
     document.getElementById('genUrl').dataset.url=url
   }
 
-  async function loadNodes(){
+  async function loadNodes(retry){
     var el=document.getElementById('nodesSection');
+    if(!retry)el.innerHTML='<div class="loading"><div class="spinner"></div>正在加载节点列表...</div>';
     try{
-      var r=await fetch('?json',{headers:{'User-Agent':'Mozilla/5.0'}});
+      var controller=new AbortController();
+      var t=setTimeout(function(){controller.abort()},8000);
+      var r=await fetch('/'+UUID+'?json',{signal:controller.signal,headers:{'Accept':'application/json'}});
+      clearTimeout(t);
+      if(!r.ok)throw new Error('HTTP '+r.status);
       var data=await r.json();
       var pref=data.preferred||[];
       var cfg=data.config||{};
       if(cfg.ADD&&cfg.ADD!=='(未设置)')document.getElementById('addInput').value=cfg.ADD;
       if(cfg.DLS>0)document.getElementById('dlsInput').value=cfg.DLS;
       var html='';
-      html+='<div class="node-section"><div class="node-header" onclick="var nl=this.nextElementSibling;nl.classList.toggle(\'collapsed\')"><h3>⭐ 优选节点</h3><span class="badge badge-pref">'+pref.length+' 个</span></div><div class="nodelist'+(pref.length>8?' collapsed':'')+'">';
+      html+='<div class="node-section"><div class="node-header" onclick="var nl=this.nextElementSibling;nl.classList.toggle(\'collapsed\')"><h3>⭐ 优选节点</h3><span class="badge badge-pref">'+pref.length+' 个</span></div><div class="nodelist'+(pref.length>10?' collapsed':'')+'">';
       if(pref.length){
         for(var i=0;i<pref.length;i++){
           html+='<div class="node-item"><span>'+pref[i].name+'</span><span class="server">'+pref[i].server+':'+pref[i].port+'</span></div>'
@@ -449,15 +547,17 @@ body{
       el.innerHTML=html;
       updateUrl()
     }catch(e){
-      el.innerHTML='<div class="loading" style="color:#ef4444">❌ 加载失败: 请检查网络连接</div>'
+      el.innerHTML='<div class="error-state">❌ 加载失败: '+(e.message||'网络异常')+'<br><button class="retry-btn" onclick="window.retryLoadNodes()">重新加载</button></div>'
     }
   }
+
+  window.retryLoadNodes=function(){loadNodes(true)};
 
   document.getElementById('applyBtn').onclick=function(){
     var btn=this,orig=btn.textContent;
     btn.textContent='⏳ 加载中...';btn.disabled=true;
     updateUrl();
-    loadNodes().then(function(){btn.textContent=orig;btn.disabled=false})
+    loadNodes(true).then(function(){btn.textContent=orig;btn.disabled=false})
   };
 
   document.getElementById('copyClashBtn').onclick=function(){
