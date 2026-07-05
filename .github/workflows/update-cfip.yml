@@ -1,0 +1,25 @@
+name: Update CFIP data
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 */6 * * *'
+
+permissions:
+  contents: write
+
+jobs:
+  update-cfip:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Fetch latest CFIP data
+        run: node scripts/update-cfip-data.mjs
+      - name: Commit changed data
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: 'chore: update cfip data'
+          file_pattern: data/cfip.json

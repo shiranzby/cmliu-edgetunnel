@@ -39,3 +39,14 @@ Do not commit Cloudflare API keys, bearer tokens, GitHub tokens, UUID secrets, o
 - `mihomo.exe -t -f <downloaded-yaml>` succeeds.
 - Runtime proxy test through mihomo returns HTTP `204` for `http://www.gstatic.com/generate_204`.
 - Runtime proxy test through mihomo returns HTTP `200` for `https://example.com/` and `https://www.cloudflare.com/cdn-cgi/trace`.
+
+## CFIP data refresh
+
+This fork keeps its own Cloudflare preferred-IP cache at `data/cfip.json`.
+
+- `.github/workflows/update-cfip.yml` runs every 6 hours and can also be run manually.
+- `scripts/update-cfip-data.mjs` scrapes `https://v2rayssr.com/cfip/`, parses `table.cfip-table`, enriches IP country/region through public IP APIs, and commits the ranked result.
+- The Worker reads `CFIP_DATA_URL` first, then falls back to this repository raw URL, then to live `v2rayssr` scraping, then to built-in fallback data.
+- Clash/Mihomo output keeps the original `优选节点` group and adds carrier groups such as `电信`, `联通`, `移动`, `多线` when CFIP data is available.
+
+GitHub Actions quota note: public repositories generally get free GitHub-hosted runner usage; private repositories on GitHub Free include limited monthly minutes. Keep the schedule at 6 hours unless a faster refresh is actually needed.
