@@ -4298,7 +4298,7 @@ function 生成CFIP线路Clash节点(基础节点文本, cfipNodes) {
 	const 节点块 = [];
 	const 已用名称 = new Set();
 	const 创建名称 = (node) => {
-		const 地区 = String(node.country || node.region || '优选').trim() || '优选';
+		const 地区 = String(node.displayRegion || node.cfCity || node.city || node.region || node.country || node.line || '优选').trim() || '优选';
 		const 速度 = String(node.speed || '').trim().replace(/mb\/s/i, 'm/s');
 		const base = `${地区}${速度 ? ' | ' + 速度 : ''}`;
 		let name = base, suffix = Number(node.rank || 1);
