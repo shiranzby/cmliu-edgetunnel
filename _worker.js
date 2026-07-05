@@ -101,11 +101,11 @@ export default {
 							}
 						});
 					} else {
-						// Subscription client: redirect to Clash format (most compatible)
+						// Subscription client: keep one clean entry URL and let /{UUID} auto-detect client format.
 						return new Response(null, {
 							status: 301,
 							headers: {
-								"Location": `https://${rootHost}/${userID}?clash=vmess`,
+								"Location": `https://${rootHost}/${userID}`,
 							}
 						});
 					}
@@ -122,6 +122,10 @@ export default {
 					const urlDLS = parseFloat(url.searchParams.get('DLS')) || 0;
 					const effectiveADD = urlADD || ADD; // URL 参数优先于 env var
 					const effectiveDLS = urlDLS || DLS;
+
+					if (url.searchParams.has('qr')) {
+						return await generateQRCodeResponse(`http://${host}/`);
+					}
 					
 					// JSON API: 返回节点列表 (仅解析 ADD，不请求外部服务以避免阻塞前端)
 					if (url.searchParams.has('json')) {
@@ -174,7 +178,7 @@ export default {
 					const vlessConfig = await getVLESSConfig(userID, host, sub, userAgent, RproxyIP);
 					if (userAgent && userAgent.includes('mozilla')){
 						// Build subscription URLs
-						const baseUrl = `https://${host}/${userID}`;
+						const baseUrl = `http://${host}/`;
 						const clashUrl = `${baseUrl}?clash=vmess`;
 						const singboxUrl = `${baseUrl}?singbox=vmess`;
 						const vlessLink = `vless://${userID}@${host}:443?encryption=none&security=tls&sni=${host}&fp=randomized&type=ws&host=${host}&path=%2F%3Fed%3D2048#${host}`;
@@ -185,7 +189,6 @@ export default {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Edgetunnel · 订阅管理</title>
-<script src="https://cdn.jsdelivr.net/npm/@keeex/qrcodejs-kx@1.0.2/qrcode.min.js"></script>
 <style>
 :root {
   --bg:#f6f8fb;
@@ -204,121 +207,121 @@ export default {
   --orange:#f59e0b;
   --violet:#8b5cf6;
   --cyan:#0ea5e9;
-  --shadow:0 12px 28px rgba(15,23,42,.06);
-  --shadow-hover:0 18px 38px rgba(15,23,42,.1);
-  --r:12px;
+  --shadow:0 .75rem 1.75rem rgba(15,23,42,.06);
+  --shadow-hover:0 1.125rem 2.375rem rgba(15,23,42,.1);
+  --r:.875rem;
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 body{
   font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'Noto Sans SC',sans-serif;
-  background:var(--bg);color:var(--text);line-height:1.55;min-height:100vh;
+  background:var(--bg);color:var(--text);line-height:1.55;min-height:100vh;font-size:clamp(14px,2.8vw,16px);
 }
-.container{max-width:720px;width:100%;margin:0 auto;padding:20px 16px}
+.container{max-width:45rem;width:100%;margin:0 auto;padding:1.25rem 1rem}
 
 /* Top bar */
 .topbar{
-  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  display:flex;align-items:center;justify-content:space-between;gap:.75rem;
   background:linear-gradient(135deg,#2563eb,#1d4ed8);
-  border-radius:var(--r);padding:14px 18px;margin-bottom:16px;
-  box-shadow:0 8px 22px -6px rgba(37,99,235,.28);
+  border-radius:var(--r);padding:.875rem 1.125rem;margin-bottom:1rem;
+  box-shadow:0 .5rem 1.375rem -.375rem rgba(37,99,235,.28);
 }
-.topbar .brand{display:flex;align-items:center;gap:10px;color:#fff}
-.topbar .brand-ico{width:34px;height:34px;border-radius:8px;background:rgba(255,255,255,.18);display:grid;place-items:center;font-size:16px}
+.topbar .brand{display:flex;align-items:center;gap:.625rem;color:#fff;min-width:0}
+.topbar .brand-ico{width:2.125rem;height:2.125rem;border-radius:.5rem;background:rgba(255,255,255,.18);display:grid;place-items:center;font-size:1rem;flex:0 0 auto}
 .topbar .brand-text{display:flex;flex-direction:column;line-height:1.1}
-.topbar .brand-text strong{font-size:17px;font-weight:800;letter-spacing:-.3px}
-.topbar .brand-text small{font-size:11px;opacity:.82;font-weight:500}
-.topbar .badges{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
-.topbar .badge{font-size:10px;padding:3px 10px;border-radius:20px;background:rgba(255,255,255,.16);color:#fff;border:1px solid rgba(255,255,255,.22);font-weight:600;white-space:nowrap}
+.topbar .brand-text strong{font-size:1.0625rem;font-weight:800;letter-spacing:-.02em}
+.topbar .brand-text small{font-size:.6875rem;opacity:.82;font-weight:500}
+.topbar .badges{display:flex;gap:.375rem;flex-wrap:wrap;justify-content:flex-end}
+.topbar .badge{font-size:.625rem;padding:.1875rem .625rem;border-radius:1.25rem;background:rgba(255,255,255,.16);color:#fff;border:1px solid rgba(255,255,255,.22);font-weight:600;white-space:nowrap}
 
 /* Card */
 .card{
   background:var(--card);border:1px solid var(--line);border-radius:var(--r);
-  box-shadow:var(--shadow);padding:16px;margin-bottom:14px;
+  box-shadow:var(--shadow);padding:1rem;margin-bottom:.875rem;
   transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease;
 }
-.card:hover{transform:translateY(-2px);box-shadow:var(--shadow-hover);border-color:color-mix(in srgb,var(--line) 55%,var(--blue))}
+.card:hover{transform:translateY(-.125rem);box-shadow:var(--shadow-hover);border-color:#bfdbfe}
 
 /* Section title */
 .section-title{
-  font-size:13px;font-weight:800;color:var(--text);margin-bottom:12px;
-  display:flex;align-items:center;gap:8px;letter-spacing:-.2px;
+  font-size:.8125rem;font-weight:800;color:var(--text);margin-bottom:.75rem;
+  display:flex;align-items:center;gap:.5rem;letter-spacing:-.0125rem;
 }
-.section-title::before{content:'';width:3px;height:14px;background:var(--blue);border-radius:2px}
+.section-title::before{content:'';width:.1875rem;height:.875rem;background:var(--blue);border-radius:.125rem}
 
 /* Stat grid */
-.stat-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
-@media(min-width:540px){.stat-grid{grid-template-columns:repeat(4,1fr)}}
+.stat-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.625rem}
+@media(min-width:34rem){.stat-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
 .stat{
-  display:grid;grid-template-columns:42px minmax(0,1fr);grid-template-rows:auto auto;column-gap:10px;row-gap:2px;
-  background:var(--soft);border:1px solid var(--line);border-radius:10px;padding:10px;
+  display:grid;grid-template-columns:2.625rem minmax(0,1fr);grid-template-rows:auto auto;column-gap:.625rem;row-gap:.125rem;
+  background:var(--soft);border:1px solid var(--line);border-radius:.625rem;padding:.625rem;
   transition:background .2s,border-color .2s;
 }
 .stat:hover{background:#fff;border-color:var(--blue-line)}
-.stat-ico{grid-column:1;grid-row:1/3;width:42px;height:42px;border-radius:50%;display:grid;place-items:center;font-size:18px;background:linear-gradient(135deg,#dbe7ff,#a9c2ff);color:var(--blue)}
+.stat-ico{grid-column:1;grid-row:1/3;width:2.625rem;height:2.625rem;border-radius:50%;display:grid;place-items:center;font-size:1.125rem;background:linear-gradient(135deg,#dbe7ff,#a9c2ff);color:var(--blue)}
 .stat-ico.green{background:linear-gradient(135deg,#d8f8e7,#a7ecc7);color:#0f9f62}
 .stat-ico.orange{background:linear-gradient(135deg,#ffe5c7,#ffc38a);color:#d97706}
 .stat-ico.violet{background:linear-gradient(135deg,#eadcff,#d5b9ff);color:#7c3aed}
-.stat-title{grid-column:2;font-size:10px;color:var(--sub);font-weight:700;text-transform:uppercase;letter-spacing:.4px}
-.stat-value{grid-column:2;font-size:13px;font-weight:800;color:var(--text);word-break:break-all;align-self:center}
+.stat-title{grid-column:2;font-size:.625rem;color:var(--sub);font-weight:700;text-transform:uppercase;letter-spacing:.025rem}
+.stat-value{grid-column:2;font-size:.8125rem;font-weight:800;color:var(--text);word-break:break-word;align-self:center;line-height:1.25}
 
 /* Subscription box */
-.sub-url-box{background:var(--blue-soft);border:1px solid var(--blue-line);border-radius:10px;padding:14px;margin-bottom:10px;transition:background .2s}
-.sub-url-box .url{font-family:'SF Mono','Fira Code','Consolas',monospace;font-size:12px;color:var(--blue);word-break:break-all;line-height:1.55;font-weight:600}
-.sub-url-box .hint{font-size:11px;color:var(--muted);margin-top:6px;display:flex;align-items:center;gap:4px}
-.format-tags{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}
-.format-tag{font-size:10px;padding:3px 10px;border-radius:20px;background:#fff;border:1px solid var(--blue-line);color:var(--muted);font-weight:600}
+.sub-url-box{background:var(--blue-soft);border:1px solid var(--blue-line);border-radius:.625rem;padding:.875rem;margin-bottom:.625rem;transition:background .2s}
+.sub-url-box .url{font-family:'SF Mono','Fira Code','Consolas',monospace;font-size:.8rem;color:var(--blue);word-break:break-all;line-height:1.55;font-weight:700}
+.sub-url-box .hint{font-size:.6875rem;color:var(--muted);margin-top:.375rem;display:flex;align-items:flex-start;gap:.25rem}
+.format-tags{display:flex;gap:.3125rem;flex-wrap:wrap;margin-top:.5rem}
+.format-tag{font-size:.625rem;padding:.1875rem .625rem;border-radius:1.25rem;background:#fff;border:1px solid var(--blue-line);color:var(--muted);font-weight:600}
 #qrcode{
-  display:none;justify-content:center;align-items:center;padding:16px 0 4px;
+  display:none;justify-content:center;align-items:center;padding:1rem 0 .25rem;
 }
 #qrcode.active{display:flex}
-#qrcode img,#qrcode canvas{border-radius:10px;padding:8px;background:#fff;border:1px solid var(--blue-line)}
+#qrcode img,#qrcode canvas{width:min(16rem,70vw);height:min(16rem,70vw);border-radius:.625rem;padding:.5rem;background:#fff;border:1px solid var(--blue-line)}
 
 /* Buttons */
 .btn{
-  display:inline-flex;align-items:center;justify-content:center;gap:5px;
-  padding:9px 18px;border:none;border-radius:8px;font-size:13px;font-weight:600;
+  display:inline-flex;align-items:center;justify-content:center;gap:.3125rem;
+  padding:.5625rem 1.125rem;border:none;border-radius:.5rem;font-size:.8125rem;font-weight:600;
   cursor:pointer;transition:all .18s;text-decoration:none;
 }
-.btn-primary{background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;box-shadow:0 2px 8px -2px rgba(37,99,235,.3)}
-.btn-primary:hover{background:linear-gradient(135deg,#1d4ed8,#1e40af);box-shadow:0 4px 12px -2px rgba(37,99,235,.4);transform:translateY(-1px)}
+.btn-primary{background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;box-shadow:0 .125rem .5rem -.125rem rgba(37,99,235,.3)}
+.btn-primary:hover{background:linear-gradient(135deg,#1d4ed8,#1e40af);box-shadow:0 .25rem .75rem -.125rem rgba(37,99,235,.4);transform:translateY(-.0625rem)}
 .btn-outline{background:#fff;color:var(--blue);border:1px solid var(--blue-line)}
-.btn-outline:hover{background:var(--blue-soft);border-color:var(--blue);transform:translateY(-1px)}
-.btn-sm{padding:6px 14px;font-size:12px}
-.btn-row{display:flex;gap:8px;flex-wrap:wrap}
+.btn-outline:hover{background:var(--blue-soft);border-color:var(--blue);transform:translateY(-.0625rem)}
+.btn-sm{padding:.375rem .875rem;font-size:.75rem}
+.btn-row{display:flex;gap:.5rem;flex-wrap:wrap}
 .btn.copied{background:var(--green)!important;border-color:var(--green)!important;color:#fff!important}
 
 /* Form */
-.form-group{margin-bottom:10px}.form-group:last-child{margin-bottom:0}
-.form-label{display:block;font-size:12px;font-weight:700;color:var(--muted);margin-bottom:4px}
+.form-group{margin-bottom:.625rem}.form-group:last-child{margin-bottom:0}
+.form-label{display:block;font-size:.75rem;font-weight:700;color:var(--muted);margin-bottom:.25rem}
 .form-input{
-  width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;
-  background:#fff;color:var(--text);font-size:13px;
+  width:100%;padding:.5625rem .75rem;border:1px solid var(--line);border-radius:.5rem;
+  background:#fff;color:var(--text);font-size:.8125rem;
   font-family:'SF Mono','Fira Code','Consolas',monospace;outline:none;
   transition:border-color .2s,box-shadow .2s;
 }
-.form-input:focus{border-color:var(--blue-light);box-shadow:0 0 0 3px rgba(37,99,235,.1)}
+.form-input:focus{border-color:var(--blue-light);box-shadow:0 0 0 .1875rem rgba(37,99,235,.1)}
 .form-input::placeholder{color:var(--sub)}
-.form-hint{font-size:11px;color:var(--sub);margin-top:4px}
+.form-hint{font-size:.6875rem;color:var(--sub);margin-top:.25rem}
 
 /* Node list */
-.node-section{margin-bottom:8px}
+.node-section{margin-bottom:.5rem}
 .node-header{
   display:flex;justify-content:space-between;align-items:center;
-  padding:9px 12px;background:var(--soft);border:1px solid var(--line);
-  border-radius:8px;cursor:pointer;user-select:none;transition:background .2s,border-color .2s;
+  padding:.5625rem .75rem;background:var(--soft);border:1px solid var(--line);
+  border-radius:.5rem;cursor:pointer;user-select:none;transition:background .2s,border-color .2s;
 }
 .node-header:hover{background:#eef4ff;border-color:var(--blue-line)}
-.node-header h3{font-size:12px;font-weight:800;color:var(--text)}
-.badge{font-size:10px;padding:2px 9px;border-radius:10px;font-weight:700}
+.node-header h3{font-size:.75rem;font-weight:800;color:var(--text)}
+.badge{font-size:.625rem;padding:.125rem .5625rem;border-radius:.625rem;font-weight:700}
 .badge-pref{background:var(--green-soft);color:var(--green)}
 .badge-fallback{background:var(--blue-soft);color:var(--blue)}
 .nodelist{
-  max-height:260px;overflow-y:auto;border:1px solid var(--line);
-  border-top:none;border-radius:0 0 8px 8px;background:var(--soft);
+  max-height:18rem;overflow-y:auto;border:1px solid var(--line);
+  border-top:none;border-radius:0 0 .5rem .5rem;background:var(--soft);
 }
 .nodelist.collapsed{display:none}
 .node-item{
-  display:flex;justify-content:space-between;padding:5px 12px;font-size:11px;
+  display:flex;justify-content:space-between;gap:.75rem;padding:.3125rem .75rem;font-size:.6875rem;
   font-family:'SF Mono','Fira Code','Consolas',monospace;color:var(--muted);
   border-bottom:1px solid var(--line);
 }
@@ -326,32 +329,35 @@ body{
 .node-item .server{color:var(--blue);font-weight:700}
 
 /* Loading / empty / error */
-.loading{text-align:center;padding:24px;color:var(--sub);font-size:12px}
+.loading{text-align:center;padding:1.5rem;color:var(--sub);font-size:.75rem}
 .loading .spinner{
-  width:18px;height:18px;border:2px solid var(--blue-line);
+  width:1.125rem;height:1.125rem;border:.125rem solid var(--blue-line);
   border-top-color:var(--blue);border-radius:50%;animation:spin .6s linear infinite;
-  margin:0 auto 6px;
+  margin:0 auto .375rem;
 }
 @keyframes spin{to{transform:rotate(360deg)}}
-.empty-state{text-align:center;padding:18px;color:var(--sub);font-size:12px}
-.empty-state .icon{font-size:26px;margin-bottom:4px;opacity:.55}
-.error-state{text-align:center;padding:18px;color:#dc2626;font-size:12px}
+.empty-state{text-align:center;padding:1.125rem;color:var(--sub);font-size:.75rem}
+.empty-state .icon{font-size:1.625rem;margin-bottom:.25rem;opacity:.55}
+.error-state{text-align:center;padding:1.125rem;color:#dc2626;font-size:.75rem}
 .retry-btn{
-  margin-top:8px;padding:5px 14px;border:1px solid #fecaca;background:#fef2f2;
-  color:#dc2626;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;
+  margin-top:.5rem;padding:.3125rem .875rem;border:1px solid #fecaca;background:#fef2f2;
+  color:#dc2626;border-radius:.375rem;font-size:.6875rem;font-weight:600;cursor:pointer;
 }
 .retry-btn:hover{background:#fee2e2}
 
-.footer{text-align:center;padding:16px;font-size:11px;color:var(--sub)}
+.footer{text-align:center;padding:1rem;font-size:.6875rem;color:var(--sub)}
 .footer a{color:var(--blue);text-decoration:none}
 .footer a:hover{text-decoration:underline}
 
-@media(max-width:480px){
-  .container{padding:12px 10px}
-  .card{padding:13px}
+@media(max-width:30rem){
+  .container{padding:.75rem .625rem}
+  .card{padding:.8125rem}
   .topbar{flex-wrap:wrap}
   .topbar .badges{width:100%;justify-content:flex-start}
-  .stat-grid{grid-template-columns:repeat(2,1fr)}
+  .stat-grid{grid-template-columns:1fr}
+  .btn-row{display:grid;grid-template-columns:1fr}
+  .btn{width:100%}
+  .node-item{flex-direction:column;gap:.125rem}
 }
 </style>
 </head>
@@ -362,7 +368,7 @@ body{
       <div class="brand-ico">🔗</div>
       <div class="brand-text">
         <strong>Edgetunnel</strong>
-        <small>Cloudflare Workers 节点订阅</small>
+        <small>Cloudflare Workers 统一订阅入口</small>
       </div>
     </div>
     <div class="badges">
@@ -377,18 +383,34 @@ body{
     <div class="status-grid stat-grid">
       <div class="stat">
         <div class="stat-ico">🆔</div>
-        <div class="stat-title">UUID</div>
-        <div class="stat-value">${userID.slice(0,13)}...</div>
+        <div class="stat-title">入口</div>
+        <div class="stat-value">根路径</div>
       </div>
       <div class="stat">
         <div class="stat-ico orange">🌐</div>
-        <div class="stat-title">服务器</div>
+        <div class="stat-title">域名</div>
         <div class="stat-value">${host}</div>
       </div>
       <div class="stat">
         <div class="stat-ico green">🔒</div>
         <div class="stat-title">传输</div>
         <div class="stat-value">WS · TLS</div>
+      </div>
+      <div class="stat">
+        <div class="stat-ico violet">🔀</div>
+        <div class="stat-title">分流</div>
+        <div class="stat-value">自动识别</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="section-title">节点凭据</div>
+    <div class="status-grid stat-grid">
+      <div class="stat">
+        <div class="stat-ico">🆔</div>
+        <div class="stat-title">UUID</div>
+        <div class="stat-value">${userID.slice(0,13)}...</div>
       </div>
       <div class="stat">
         <div class="stat-ico violet">📡</div>
@@ -402,7 +424,7 @@ body{
     <div class="section-title">订阅链接</div>
     <div class="sub-url-box" id="subBox">
       <div class="url" id="subUrl">${baseUrl}</div>
-      <div class="hint">💡 自动识别客户端：Clash Meta / Sing-box / v2rayN / Nekoray / Shadowrocket</div>
+      <div class="hint">💡 使用根路径作为唯一订阅入口，后端根据客户端自动返回 Clash / Sing-box / VLESS。</div>
       <div class="format-tags">
         <span class="format-tag">Clash Meta</span>
         <span class="format-tag">Sing-box</span>
@@ -448,7 +470,7 @@ body{
   </div>
 
   <div class="footer">
-    Powered by <a href="https://github.com/cmliu/edgetunnel" target="_blank">edgetunnel</a>
+    Powered by <a href="https://github.com/shiranzby/cmliu-edgetunnel" target="_blank">edgetunnel</a>
   </div>
 </div>
 
@@ -458,7 +480,6 @@ body{
   var HOST='${host}';
   var BASE='${baseUrl}';
   var showQr=false;
-  var qrCode=null;
 
   function copyText(text,btn,orig){
     var origT=orig||btn.textContent;
@@ -491,15 +512,7 @@ body{
     }
     subBox.style.display='none';
     box.classList.add('active');box.innerHTML='';
-    try{
-      qrCode=new QRCode(box,{
-        text:BASE,width:200,height:200,
-        colorDark:'#2563eb',colorLight:'#ffffff',
-        correctLevel:QRCode.CorrectLevel.L
-      });
-    }catch(e){
-      box.innerHTML='<div class="empty-state"><div class="icon">⚠️</div>二维码生成失败</div>';
-    }
+    box.innerHTML='<img alt="订阅二维码" src="/'+UUID+'?qr&t='+Date.now()+'">';
     btn.innerHTML='🔗 订阅链接';
   }
 
@@ -524,10 +537,9 @@ body{
     var el=document.getElementById('nodesSection');
     if(!retry)el.innerHTML='<div class="loading"><div class="spinner"></div>正在加载节点列表...</div>';
     try{
-      var controller=new AbortController();
-      var t=setTimeout(function(){controller.abort()},8000);
-      var r=await fetch('/'+UUID+'?json',{signal:controller.signal,headers:{'Accept':'application/json'}});
-      clearTimeout(t);
+      var timeout=new Promise(function(_,reject){setTimeout(function(){reject(new Error('请求超时'))},8000)});
+      var request=fetch('/'+UUID+'?json&t='+Date.now(),{headers:{'Accept':'application/json'},cache:'no-store'});
+      var r=await Promise.race([request,timeout]);
       if(!r.ok)throw new Error('HTTP '+r.status);
       var data=await r.json();
       var pref=data.preferred||[];
@@ -535,7 +547,7 @@ body{
       if(cfg.ADD&&cfg.ADD!=='(未设置)')document.getElementById('addInput').value=cfg.ADD;
       if(cfg.DLS>0)document.getElementById('dlsInput').value=cfg.DLS;
       var html='';
-      html+='<div class="node-section"><div class="node-header" onclick="var nl=this.nextElementSibling;nl.classList.toggle(\'collapsed\')"><h3>⭐ 优选节点</h3><span class="badge badge-pref">'+pref.length+' 个</span></div><div class="nodelist'+(pref.length>10?' collapsed':'')+'">';
+      html+='<div class="node-section"><div class="node-header"><h3>⭐ 优选节点</h3><span class="badge badge-pref">'+pref.length+' 个</span></div><div class="nodelist'+(pref.length>10?' collapsed':'')+'">';
       if(pref.length){
         for(var i=0;i<pref.length;i++){
           html+='<div class="node-item"><span>'+pref[i].name+'</span><span class="server">'+pref[i].server+':'+pref[i].port+'</span></div>'
@@ -545,6 +557,13 @@ body{
       }
       html+='</div></div>';
       el.innerHTML=html;
+      var headers=el.querySelectorAll('.node-header');
+      for(var j=0;j<headers.length;j++){
+        headers[j].onclick=function(){
+          var nl=this.nextElementSibling;
+          if(nl)nl.classList.toggle('collapsed')
+        }
+      }
       updateUrl()
     }catch(e){
       el.innerHTML='<div class="error-state">❌ 加载失败: '+(e.message||'网络异常')+'<br><button class="retry-btn" onclick="window.retryLoadNodes()">重新加载</button></div>'
@@ -1346,6 +1365,37 @@ function generateUUID() {
  * @param {number} defaultPort
  * @returns {Array<{host:string, port:number, name:string}>}
  */
+async function generateQRCodeResponse(text) {
+	const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=512x512&format=svg&ecc=L&margin=12&data=${encodeURIComponent(text)}`;
+	try {
+		const response = await fetch(qrUrl, {
+			headers: { 'Accept': 'image/svg+xml', 'User-Agent': 'CF-Workers-edgetunnel/shyvpn' },
+		});
+		if (response.ok) {
+			return new Response(await response.text(), {
+				status: 200,
+				headers: {
+					'Content-Type': 'image/svg+xml;charset=utf-8',
+					'Cache-Control': 'no-store',
+					'Access-Control-Allow-Origin': '*',
+				},
+			});
+		}
+	} catch (error) {
+		console.error('Error generating QR code:', error);
+	}
+	const escapedText = text.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+	const fallbackSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512"><rect width="512" height="512" fill="#fff"/><rect x="24" y="24" width="464" height="464" rx="28" fill="#eff6ff" stroke="#bfdbfe" stroke-width="4"/><text x="256" y="238" text-anchor="middle" font-family="Arial, sans-serif" font-size="28" font-weight="700" fill="#2563eb">QR 生成失败</text><text x="256" y="286" text-anchor="middle" font-family="Arial, sans-serif" font-size="20" fill="#64748b">${escapedText}</text></svg>`;
+	return new Response(fallbackSvg, {
+		status: 200,
+		headers: {
+			'Content-Type': 'image/svg+xml;charset=utf-8',
+			'Cache-Control': 'no-store',
+			'Access-Control-Allow-Origin': '*',
+		},
+	});
+}
+
 function parseHostPort(value, defaultPort = 443) {
 	let host = value.trim();
 	let port = defaultPort;
