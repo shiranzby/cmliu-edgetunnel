@@ -4276,7 +4276,8 @@ async function 获取CFIP线路数据(config_JSON = {}) {
 	].filter(Boolean);
 	for (const url of urls) {
 		try {
-			const response = await fetch(url, { headers: { 'User-Agent': 'ShyVPN edge' + 'tunnel CFIP data' } });
+			const requestURL = url.includes('raw.githubusercontent.com') ? `${url}${url.includes('?') ? '&' : '?'}t=${Math.floor(Date.now() / 3600000)}` : url;
+			const response = await fetch(requestURL, { headers: { 'User-Agent': 'ShyVPN edge' + 'tunnel CFIP data' }, cf: { cacheTtl: 0, cacheEverything: false } });
 			if (!response.ok) continue;
 			const text = await response.text();
 			if (url.endsWith('.json') || text.trim().startsWith('{')) {
@@ -4298,7 +4299,7 @@ function 生成CFIP线路Clash节点(基础节点文本, cfipNodes) {
 	const 节点块 = [];
 	const 已用名称 = new Set();
 	const 创建名称 = (node) => {
-		const 地区 = String(node.displayRegion || node.cfCity || node.city || node.region || node.country || node.line || '优选').trim() || '优选';
+		const 地区 = String(node.displayRegion || node.cfCity || node.city || node.region || node.line || node.country || '优选').trim() || '优选';
 		const 速度 = String(node.speed || '').trim().replace(/mb\/s/i, 'm/s');
 		const base = `${地区}${速度 ? ' | ' + 速度 : ''}`;
 		let name = base, suffix = Number(node.rank || 1);
