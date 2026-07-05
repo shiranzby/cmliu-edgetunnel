@@ -17,6 +17,20 @@ let subconfig = "https://raw.githubusercontent.com/cmliu/ACL4SSR/main/Clash/conf
 // Example:  user:pass@host:port  or  host:port
 let socks5Address = '';
 let RproxyIP = 'false';
+
+// ========== WorkerVless2sub 融合功能：优选IP来源 ==========
+let ADD = '';          // 静态优选IP，格式: "ip:port#别名,domain:port#别名"
+let ADDAPI = '';       // 远程优选IP TXT 文件 URL
+let ADDCSV = '';       // CSV 测速数据 URL
+let DLS = 0;           // 测速速度下限 (Mbps)
+let ADDNOTLS = '';     // 非 TLS 静态优选IP
+let ADDNOTLSAPI = '';   // 非 TLS 远程优选IP URL
+let CMPROXYIPS = '';   // 地区优选 ProxyIP，格式: "proxyip.domain#HK,proxyip.domain#SG"
+let SOCKS5DATA = '';   // Socks5 代理池数据 URL
+let PROXYIPAPI = '';   // ProxyIP 列表 API URL
+let CMADD = '';        // 本地补充 ProxyIP 列表
+let CFPORTS = '443,2053,2083,2087,2096,8443'; // CF 标准端口列表
+// =====================================================
 if (!isValidUUID(userID)) {
 	throw new Error('uuid is not valid');
 }
@@ -44,6 +58,18 @@ export default {
 			sub = env.SUB || sub;
 			subconverter = env.SUBAPI || subconverter;
 			subconfig = env.SUBCONFIG || subconfig;
+			// WorkerVless2sub 融合: 优选IP来源
+			ADD = env.ADD || ADD;
+			ADDAPI = env.ADDAPI || ADDAPI;
+			ADDCSV = env.ADDCSV || ADDCSV;
+			DLS = parseFloat(env.DLS) || DLS;
+			ADDNOTLS = env.ADDNOTLS || ADDNOTLS;
+			ADDNOTLSAPI = env.ADDNOTLSAPI || ADDNOTLSAPI;
+			CMPROXYIPS = env.CMPROXYIPS || CMPROXYIPS;
+			SOCKS5DATA = env.SOCKS5DATA || SOCKS5DATA;
+			PROXYIPAPI = env.PROXYIPAPI || PROXYIPAPI;
+			CMADD = env.CMADD || CMADD;
+			CFPORTS = env.CFPORTS || CFPORTS;
 			//RproxyIP = env.RPROXYIP || !proxyIP ? 'true' : 'false';
 			if (socks5Address) {
 				RproxyIP = env.RPROXYIP || 'false';
@@ -64,18 +90,181 @@ export default {
 				// const url = new URL(request.url);
 				switch (url.pathname) {
 				case '/':
-					return new Response(JSON.stringify(request.cf), { status: 200 });
+					// Root path: auto-detect client type
+					const rootHost = request.headers.get('Host') || url.host;
+					if (userAgent && userAgent.includes('mozilla')) {
+						// Browser: redirect to HTML page
+						return new Response(null, {
+							status: 301,
+							headers: {
+								"Location": `https://${rootHost}/${userID}`,
+							}
+						});
+					} else {
+						// Subscription client: redirect to Clash format (most compatible)
+						return new Response(null, {
+							status: 301,
+							headers: {
+								"Location": `https://${rootHost}/${userID}?clash=vmess`,
+							}
+						});
+					}
 				case `/${userID}`: {
-					const vlessConfig = await getVLESSConfig(userID, request.headers.get('Host'), sub, userAgent, RproxyIP);
+					const host = request.headers.get('Host');
 					const now = Date.now();
 					const timestamp = Math.floor(now / 1000);
 					const today = new Date(now);
 					today.setHours(0, 0, 0, 0);
-					if (userAgent && userAgent.includes('mozilla')){
-						return new Response(`${vlessConfig}`, {
+					const format = url.searchParams.get('clash') || url.searchParams.get('singbox') ? 'clash' : (url.searchParams.get('format') || '');
+					
+					// Clash subscription: detect by query param or User-Agent
+					const isClashClient = url.searchParams.has('clash') || (userAgent && (userAgent.includes('clash') || userAgent.includes('verge') || userAgent.includes('clashmeta') || userAgent.includes('nyanpasu') || userAgent.includes('cfw')) && !userAgent.includes('mozilla'));
+					if (isClashClient) {
+						const clashYaml = await generateClashConfig(userID, host, sub, RproxyIP);
+						return new Response(clashYaml, {
 							status: 200,
 							headers: {
-								"Content-Type": "text/plain;charset=utf-8",
+								"Content-Disposition": "attachment; filename=clash.yaml; filename*=utf-8''clash.yaml",
+								"Content-Type": "text/yaml;charset=utf-8",
+								"Profile-Update-Interval": "6",
+								"Subscription-Userinfo": `upload=0; download=${Math.floor(((now - today.getTime())/86400000) * 24 * 1099511627776)}; total=${24 * 1099511627776}; expire=${timestamp}`,
+							}
+						});
+					}
+					
+					// Sing-box subscription: detect by query param or User-Agent
+					const isSingboxClient = url.searchParams.has('singbox') || url.searchParams.has('sing-box') || (userAgent && (userAgent.includes('singbox') || userAgent.includes('sing-box') || userAgent.includes('sfi')) && !userAgent.includes('mozilla'));
+					if (isSingboxClient) {
+						const singboxJson = generateSingboxConfig(userID, host);
+						return new Response(singboxJson, {
+							status: 200,
+							headers: {
+								"Content-Disposition": "attachment; filename=singbox.json; filename*=utf-8''singbox.json",
+								"Content-Type": "application/json;charset=utf-8",
+								"Profile-Update-Interval": "6",
+								"Subscription-Userinfo": `upload=0; download=${Math.floor(((now - today.getTime())/86400000) * 24 * 1099511627776)}; total=${24 * 1099511627776}; expire=${timestamp}`,
+							}
+						});
+					}
+					
+					const vlessConfig = await getVLESSConfig(userID, host, sub, userAgent, RproxyIP);
+					if (userAgent && userAgent.includes('mozilla')){
+						// Build subscription URLs
+						const baseUrl = `https://${host}/${userID}`;
+						const clashUrl = `${baseUrl}?clash=vmess`;
+						const singboxUrl = `${baseUrl}?singbox=vmess`;
+						const vlessLink = `vless://${userID}@${host}:443?encryption=none&security=tls&sni=${host}&fp=randomized&type=ws&host=${host}&path=%2F%3Fed%3D2048#${host}`;
+						
+						const html = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Edgetunnel - 订阅管理</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background:linear-gradient(135deg,#0f0c29,#302b63,#24243e);min-height:100vh;display:flex;justify-content:center;align-items:center;padding:20px;color:#e0e0e0}
+.container{max-width:600px;width:100%;background:rgba(255,255,255,.05);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-radius:20px;padding:32px;border:1px solid rgba(255,255,255,.1);box-shadow:0 25px 50px -12px rgba(0,0,0,.5)}
+.header{text-align:center;margin-bottom:24px}
+.header h1{font-size:22px;font-weight:700;background:linear-gradient(135deg,#667eea,#764ba2);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.header p{font-size:13px;color:rgba(255,255,255,.5);margin-top:4px}
+.status{display:flex;align-items:center;justify-content:center;gap:6px;margin-bottom:20px;font-size:13px;color:rgba(255,255,255,.6);flex-wrap:wrap}
+.status-dot{width:8px;height:8px;border-radius:50%;background:#22c55e;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.info-card{background:rgba(255,255,255,.05);border-radius:12px;padding:16px;margin-bottom:16px;border:1px solid rgba(255,255,255,.06)}
+.info-row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;font-size:13px;border-bottom:1px solid rgba(255,255,255,.04)}
+.info-row:last-child{border-bottom:none}
+.info-label{color:rgba(255,255,255,.5)}
+.info-value{color:#e0e0e0;font-family:'SF Mono','Fira Code','Consolas',monospace;font-size:12px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right}
+.qr-section{display:flex;justify-content:center;margin-bottom:16px}
+.qr-card{background:#fff;border-radius:12px;padding:12px;text-align:center}
+.qr-card img{width:160px;height:160px;display:block;border-radius:4px}
+.qr-card .qr-label{color:#999;font-size:11px;margin-top:6px}
+.sub-card{background:rgba(255,255,255,.05);border-radius:12px;padding:16px;margin-bottom:12px;border:1px solid rgba(255,255,255,.06);transition:all .2s}
+.sub-card:hover{border-color:rgba(102,126,234,.3)}
+.sub-card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.sub-card-title{font-size:14px;font-weight:600;color:#e0e0e0}
+.sub-card-badge{font-size:10px;padding:2px 8px;border-radius:10px;background:rgba(102,126,234,.2);color:#667eea}
+.sub-url{font-size:11px;color:rgba(255,255,255,.4);word-break:break-all;margin-bottom:10px;line-height:1.5;font-family:'SF Mono','Fira Code','Consolas',monospace}
+.copy-btn{width:100%;padding:10px;border:none;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;transition:all .2s;display:flex;align-items:center;justify-content:center;gap:6px}
+.copy-btn.vless{background:linear-gradient(135deg,#667eea,#764ba2);color:#fff}
+.copy-btn.clash{background:linear-gradient(135deg,#f093fb,#f5576c);color:#fff}
+.copy-btn.singbox{background:linear-gradient(135deg,#4facfe,#00f2fe);color:#fff}
+.copy-btn:hover{transform:translateY(-1px);box-shadow:0 8px 25px -5px rgba(0,0,0,.3)}
+.copy-btn:active{transform:translateY(0)}
+.copy-btn.copied{background:linear-gradient(135deg,#22c55e,#16a34a)!important}
+.footer{text-align:center;margin-top:20px;font-size:11px;color:rgba(255,255,255,.3)}
+.footer a{color:rgba(102,126,234,.6);text-decoration:none}
+.footer a:hover{color:#667eea}
+@media(max-width:480px){.container{padding:20px}.info-value{max-width:160px}}
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <h1>🔗 Edgetunnel</h1>
+    <p>VLESS · 优选IP · 多格式订阅管理</p>
+  </div>
+  <div class="status">
+    <span class="status-dot"></span>
+    <span>节点：<strong style="color:#22c55e">活跃</strong></span>
+    <span style="margin:0 6px;opacity:.3">|</span>
+    <span>ProxyIP：<strong style="color:#667eea">${RproxyIP}</strong></span>
+    <span style="margin:0 6px;opacity:.3">|</span>
+    <span>Auto：<strong style="color:#4facfe">${sub || '内置'}</strong></span>
+  </div>
+  <div class="info-card">
+    <div class="info-row"><span class="info-label">UUID</span><span class="info-value" id="uuid">${userID}</span></div>
+    <div class="info-row"><span class="info-label">服务器</span><span class="info-value">${host}</span></div>
+    <div class="info-row"><span class="info-label">端口</span><span class="info-value">443</span></div>
+    <div class="info-row"><span class="info-label">传输协议</span><span class="info-value">WebSocket</span></div>
+    <div class="info-row"><span class="info-label">TLS</span><span class="info-value">✓ 已启用</span></div>
+    <div class="info-row"><span class="info-label">订阅服务</span><span class="info-value">${sub || '内置'}</span></div>
+  </div>
+  <div class="qr-section">
+    <div class="qr-card">
+      <img src="https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(baseUrl)}" alt="QR Code" onerror="this.style.display='none'">
+      <div class="qr-label">扫码获取 VLESS 订阅</div>
+    </div>
+  </div>
+  <div class="sub-card">
+    <div class="sub-card-header">
+      <span class="sub-card-title">📦 VLESS 订阅链接</span>
+      <span class="sub-card-badge">通用</span>
+    </div>
+    <div class="sub-url">${baseUrl}</div>
+    <button class="copy-btn vless" onclick="copyText('${baseUrl}',this)">📋 复制订阅链接</button>
+  </div>
+  <div class="sub-card">
+    <div class="sub-card-header">
+      <span class="sub-card-title">⚡ Clash Meta 订阅（优选+备用）</span>
+      <span class="sub-card-badge">Clash</span>
+    </div>
+    <div class="sub-url">${clashUrl}</div>
+    <button class="copy-btn clash" onclick="copyText('${clashUrl}',this)">📋 复制 Clash 订阅链接</button>
+  </div>
+  <div class="sub-card">
+    <div class="sub-card-header">
+      <span class="sub-card-title">🎯 Sing-box 订阅链接</span>
+      <span class="sub-card-badge">Sing-box</span>
+    </div>
+    <div class="sub-url">${singboxUrl}</div>
+    <button class="copy-btn singbox" onclick="copyText('${singboxUrl}',this)">📋 复制 Sing-box 订阅链接</button>
+  </div>
+  <div class="footer">
+    <p>Powered by <a href="https://github.com/cmliu/edgetunnel" target="_blank">cmliu/edgetunnel</a> · <a href="https://github.com/cmliu/WorkerVless2sub" target="_blank">WorkerVless2sub</a></p>
+  </div>
+</div>
+<script>
+function copyText(text,btn){if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(function(){btn.textContent="✅ 已复制！";btn.classList.add("copied");setTimeout(function(){btn.textContent="📋 再复制一份";btn.classList.remove("copied")},2000)}).catch(function(){fallbackCopy(text,btn)})}else{fallbackCopy(text,btn)}}
+function fallbackCopy(text,btn){var ta=document.createElement("textarea");ta.value=text;ta.style.position="fixed";ta.style.left="-9999px";document.body.appendChild(ta);ta.select();try{document.execCommand("copy");btn.textContent="✅ 已复制！";btn.classList.add("copied");setTimeout(function(){btn.textContent="📋 再复制一份";btn.classList.remove("copied")},2000)}catch(e){alert("复制失败，请手动复制")}document.body.removeChild(ta)}
+</script>
+</body>
+</html>`;
+						return new Response(html, {
+							status: 200,
+							headers: {
+								"Content-Type": "text/html;charset=utf-8",
 							}
 						});
 					} else {
@@ -835,6 +1024,441 @@ function generateUUID() {
 		}
 	}
 	return uuid.replace(/(.{8})(.{4})(.{4})(.{4})(.{12})/, '$1-$2-$3-$4-$5').toLowerCase();
+}
+
+// ========== WorkerVless2sub 融合功能函数 ==========
+
+/**
+ * Parse preferred IP list from text (ADD format)
+ * @param {string} text - "ip:port#alias,domain:port#alias"
+ * @param {number} defaultPort
+ * @returns {Array<{host:string, port:number, name:string}>}
+ */
+function parseIPList(text, defaultPort = 443) {
+	const nodes = [];
+	if (!text) return nodes;
+	const items = text.split(',').map(s => s.trim()).filter(Boolean);
+	for (const item of items) {
+		let host = item;
+		let port = defaultPort;
+		let name = '';
+		const hashIdx = item.lastIndexOf('#');
+		if (hashIdx > 0) {
+			name = item.slice(hashIdx + 1).trim();
+			host = item.slice(0, hashIdx).trim();
+		}
+		const colonIdx = host.lastIndexOf(':');
+		if (colonIdx > 0) {
+			const parsedPort = parseInt(host.slice(colonIdx + 1));
+			if (!isNaN(parsedPort) && parsedPort > 0 && parsedPort < 65536) {
+				port = parsedPort;
+				host = host.slice(0, colonIdx);
+			}
+		}
+		if (host) nodes.push({ host, port, name: name || `${host}:${port}` });
+	}
+	return nodes;
+}
+
+/**
+ * Parse CSV speed test data and return nodes above speed threshold
+ * @param {string} csvText 
+ * @param {number} minSpeed - Minimum speed in Mbps
+ * @param {number} defaultPort
+ * @returns {Array<{host:string, port:number, name:string}>}
+ */
+function parseCSV(csvText, minSpeed = 0, defaultPort = 443) {
+	const nodes = [];
+	const lines = csvText.split('\n').map(s => s.trim()).filter(Boolean);
+	let isHeader = true;
+	for (const line of lines) {
+		if (isHeader) { isHeader = false; continue; }
+		const parts = line.split(',');
+		if (parts.length < 2) continue;
+		const ip = parts[0].trim();
+		const speed = parseFloat(parts[1]);
+		if (!ip || (minSpeed > 0 && (isNaN(speed) || speed < minSpeed))) continue;
+		let port = defaultPort;
+		if (parts.length >= 3) {
+			const p = parseInt(parts[2]);
+			if (!isNaN(p) && p > 0) port = p;
+		}
+		nodes.push({ host: ip, port, name: `${ip}:${port}` });
+	}
+	return nodes;
+}
+
+/**
+ * Fetch preferred nodes from all sources (ADD, ADDAPI, ADDCSV)
+ * @param {string} userID
+ * @param {string} hostName 
+ * @returns {Promise<Array<{name:string, server:string, port:number, uuid:string, sni:string, path:string, fp:string}>>}
+ */
+async function fetchPreferredNodes(userID, hostName) {
+	const nodes = [];
+	const defaultPorts = CFPORTS.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+	const defaultPort = defaultPorts[0] || 443;
+	
+	// 1. Static ADD (静态优选IP)
+	if (ADD) {
+		const staticNodes = parseIPList(ADD, defaultPort);
+		for (const n of staticNodes) {
+			nodes.push({
+				name: n.name || `优选-${n.host}:${n.port}`,
+				server: n.host,
+				port: n.port,
+				uuid: userID,
+				sni: hostName,
+				path: '/?ed=2048',
+				fp: 'chrome'
+			});
+		}
+	}
+	
+	// 2. Remote ADDAPI (远程优选IP TXT)
+	if (ADDAPI && typeof fetch === 'function') {
+		try {
+			const resp = await fetch(ADDAPI, { headers: { 'User-Agent': 'CF-Workers-edgetunnel/cmliu' } });
+			const text = await resp.text();
+			const remoteNodes = parseIPList(text, defaultPort);
+			for (const n of remoteNodes) {
+				nodes.push({
+					name: n.name || `优选-${n.host}:${n.port}`,
+					server: n.host,
+					port: n.port,
+					uuid: userID,
+					sni: hostName,
+					path: '/?ed=2048',
+					fp: 'chrome'
+				});
+			}
+		} catch (e) { console.error('ADDAPI fetch error:', e); }
+	}
+	
+	// 3. CSV speed test (CSV测速数据)
+	if (ADDCSV && typeof fetch === 'function') {
+		try {
+			const resp = await fetch(ADDCSV, { headers: { 'User-Agent': 'CF-Workers-edgetunnel/cmliu' } });
+			const text = await resp.text();
+			const csvNodes = parseCSV(text, DLS, defaultPort);
+			for (const n of csvNodes) {
+				nodes.push({
+					name: `测速-${n.host}:${n.port}`,
+					server: n.host,
+					port: n.port,
+					uuid: userID,
+					sni: hostName,
+					path: '/?ed=2048',
+					fp: 'chrome'
+				});
+			}
+		} catch (e) { console.error('ADDCSV fetch error:', e); }
+	}
+	
+	// 4. Add non-TLS nodes from ADDNOTLS / ADDNOTLSAPI
+	if (ADDNOTLS) {
+		const notlsNodes = parseIPList(ADDNOTLS, 80);
+		for (const n of notlsNodes) {
+			nodes.push({
+				name: `NOTLS-${n.name || `${n.host}:${n.port}`}`,
+				server: n.host,
+				port: n.port,
+				uuid: userID,
+				sni: hostName,
+				path: '/?ed=2048',
+				fp: 'chrome'
+			});
+		}
+	}
+	if (ADDNOTLSAPI && typeof fetch === 'function') {
+		try {
+			const resp = await fetch(ADDNOTLSAPI, { headers: { 'User-Agent': 'CF-Workers-edgetunnel/cmliu' } });
+			const text = await resp.text();
+			const notlsNodes = parseIPList(text, 80);
+			for (const n of notlsNodes) {
+				nodes.push({
+					name: `NOTLS-${n.name || `${n.host}:${n.port}`}`,
+					server: n.host,
+					port: n.port,
+					uuid: userID,
+					sni: hostName,
+					path: '/?ed=2048',
+					fp: 'chrome'
+				});
+			}
+		} catch (e) { console.error('ADDNOTLSAPI error:', e); }
+	}
+	
+	return nodes;
+}
+
+/**
+ * Fetch fallback nodes from the SUB service (existing behavior)
+ * @param {string} userID
+ * @param {string} hostName
+ * @param {string} sub
+ * @param {string} RproxyIP
+ * @returns {Promise<Array<{name:string, server:string, port:number, uuid:string, sni:string, path:string, fp:string}>>}
+ */
+async function fetchFallbackNodes(userID, hostName, sub, RproxyIP) {
+	const proxies = [];
+	if (typeof fetch !== 'function' || !sub) return proxies;
+	
+	let fHostName = `${fakeHostName}.${generateRandomString()}${generateRandomNumber()}.workers.dev`;
+	if (!hostName.includes(".workers.dev") && !hostName.includes(".pages.dev")){
+		fHostName = `${fakeHostName}.${generateRandomNumber()}.xyz`;
+	}
+	
+	try {
+		const subUrl = `https://${sub}/sub?host=${fHostName}&uuid=${fakeUserID}&edgetunnel=cmliu&proxyip=${RproxyIP}`;
+		const response = await fetch(subUrl, {
+			headers: {'User-Agent': 'CF-Workers-edgetunnel/cmliu'}
+		});
+		let content = await response.text();
+		content = revertFakeInfo(content, userID, hostName, true);
+		
+		let decoded;
+		try { decoded = atob(content); } catch { return proxies; }
+		
+		for (const line of decoded.split('\n')) {
+			const trimmed = line.trim();
+			if (!trimmed.startsWith('vless://')) continue;
+			try {
+				const rest = trimmed.slice(8);
+				const atIdx = rest.indexOf('@');
+				const qIdx = rest.indexOf('?');
+				const hashIdx = rest.indexOf('#');
+				if (atIdx < 0 || qIdx < 0) continue;
+				const uuid = rest.slice(0, atIdx);
+				const serverPart = rest.slice(atIdx + 1, qIdx);
+				const paramsStr = rest.slice(qIdx + 1, hashIdx > 0 ? hashIdx : undefined);
+				const name = hashIdx > 0 ? decodeURIComponent(rest.slice(hashIdx + 1)) : `Node-${proxies.length + 1}`;
+				const sp = new URLSearchParams(paramsStr);
+				const serverColon = serverPart.lastIndexOf(':');
+				const server = serverPart.slice(0, serverColon);
+				const port = serverPart.slice(serverColon + 1);
+				const sni = sp.get('sni') || hostName;
+				const path = sp.get('path') || '/?ed=2048';
+				const fp = sp.get('fp') || 'chrome';
+				proxies.push({
+					name: name.replace(/[^a-zA-Z0-9\u4e00-\u9fff\-_() ]/g, '').trim() || `Node-${proxies.length + 1}`,
+					server, port: parseInt(port) || 443, uuid, sni, path, fp
+				});
+			} catch {}
+		}
+	} catch (e) { console.error('Fallback fetch error:', e); }
+	return proxies;
+}
+
+/** Generate unique names for proxy array */
+function deduplicateNames(proxies) {
+	const nameCounts = {};
+	for (const p of proxies) {
+		const originalName = p.name;
+		nameCounts[originalName] = (nameCounts[originalName] || 0) + 1;
+		if (nameCounts[originalName] > 1) p.name = `${originalName}-${nameCounts[originalName]}`;
+	}
+	for (const p of proxies) {
+		p.name = p.name.replace(/[\n\r]/g, ' ').replace(/"/g, '').trim();
+	}
+}
+
+/** Build YAML proxy entries from array */
+function buildProxyYaml(proxies) {
+	let yaml = '';
+	for (const p of proxies) {
+		yaml += `  - name: "${p.name}"
+    type: vless
+    server: "${p.server}"
+    port: ${p.port}
+    uuid: "${p.uuid}"
+    network: ws
+    tls: true
+    servername: "${p.sni}"
+    sni: "${p.sni}"
+    client-fingerprint: "${p.fp}"
+    ws-opts:
+      path: "${p.path}"
+      headers:
+        host: "${p.sni}"
+`;
+	}
+	return yaml;
+}
+
+async function generateClashConfig(userID, hostName, sub, RproxyIP) {
+	if (typeof fetch != 'function') {
+		return generateBasicClashConfig(userID, hostName);
+	}
+	
+	// Phase 1: Fetch preferred nodes from WorkerVless2sub sources
+	const preferredNodes = await fetchPreferredNodes(userID, hostName);
+	deduplicateNames(preferredNodes);
+	
+	// Phase 2: Fetch fallback nodes from SUB service
+	const fallbackNodes = await fetchFallbackNodes(userID, hostName, sub, RproxyIP);
+	deduplicateNames(fallbackNodes);
+	
+	if (preferredNodes.length === 0 && fallbackNodes.length === 0) {
+		return generateBasicClashConfig(userID, hostName);
+	}
+	
+	// Phase 3: Build Clash YAML with two groups
+	const prefYaml = buildProxyYaml(preferredNodes);
+	const fallYaml = buildProxyYaml(fallbackNodes);
+	
+	const prefNames = preferredNodes.map(p => `"${p.name}"`).join('\n      - ');
+	const fallNames = fallbackNodes.map(p => `"${p.name}"`).join('\n      - ');
+	const allNames = [...preferredNodes, ...fallbackNodes].map(p => `"${p.name}"`).join('\n      - ');
+	
+	let yaml = `mixed-port: 7890
+allow-lan: false
+bind-address: '*'
+mode: rule
+log-level: info
+external-controller: 127.0.0.1:9090
+ipv6: true
+
+# ===== 优选节点 (WorkerVless2sub 优选IP) =====
+proxies:
+${prefYaml}
+# ===== 备用节点 (SUB 服务) =====
+${fallYaml}
+proxy-groups:
+  - name: "PROXY"
+    type: select
+    proxies:
+      - "优选"
+      - "自动选择"
+      - "故障转移"
+      - "备用"
+      - DIRECT
+
+  - name: "优选"
+    type: select
+    proxies:
+      - ${prefNames || '- DIRECT'}
+
+  - name: "备用"
+    type: select
+    proxies:
+      - ${fallNames || '- DIRECT'}
+
+  - name: "自动选择"
+    type: url-test
+    url: "http://www.gstatic.com/generate_204"
+    interval: 300
+    tolerance: 50
+    proxies:
+      - ${allNames || '- DIRECT'}
+
+  - name: "故障转移"
+    type: fallback
+    url: "http://www.gstatic.com/generate_204"
+    interval: 300
+    tolerance: 50
+    proxies:
+      - ${allNames || '- DIRECT'}
+
+  - name: "Final"
+    type: select
+    proxies:
+      - "PROXY"
+      - DIRECT
+
+rules:
+  - GEOIP,CN,DIRECT,no-resolve
+  - MATCH,Final
+`;
+	return yaml;
+}
+
+/**
+ * Generate a basic single-node Clash YAML (fallback when SUB is unavailable)
+ */
+function generateBasicClashConfig(userID, hostName) {
+	return `mixed-port: 7890
+allow-lan: false
+bind-address: '*'
+mode: rule
+log-level: info
+external-controller: 127.0.0.1:9090
+ipv6: true
+
+proxies:
+  - name: "${hostName}"
+    type: vless
+    server: "${hostName}"
+    port: 443
+    uuid: "${userID}"
+    network: ws
+    tls: true
+    sni: "${hostName}"
+    servername: "${hostName}"
+    client-fingerprint: chrome
+    ws-opts:
+      path: "/?ed=2048"
+      headers:
+        host: "${hostName}"
+
+proxy-groups:
+  - name: "PROXY"
+    type: select
+    proxies:
+      - "${hostName}"
+  - name: "Final"
+    type: select
+    proxies:
+      - "PROXY"
+      - DIRECT
+
+rules:
+  - GEOIP,CN,DIRECT,no-resolve
+  - MATCH,Final
+`;
+}
+
+/**
+ * Generate a Sing-box JSON outbound profile directly in Worker
+ * @param {string} userID
+ * @param {string} hostName
+ * @returns {string}
+ */
+function generateSingboxConfig(userID, hostName) {
+	const config = {
+		"log": {
+			"level": "info"
+		},
+		"outbounds": [
+			{
+				"type": "vless",
+				"tag": hostName,
+				"server": hostName,
+				"server_port": 443,
+				"uuid": userID,
+				"transport": {
+					"type": "ws",
+					"path": "/?ed=2048",
+					"headers": {
+						"host": hostName
+					}
+				},
+				"tls": {
+					"enabled": true,
+					"server_name": hostName,
+					"utls": {
+						"enabled": true,
+						"fingerprint": "chrome"
+					}
+				}
+			},
+			{
+				"type": "direct",
+				"tag": "direct"
+			}
+		]
+	};
+	return JSON.stringify(config, null, 2);
 }
 
 /**
