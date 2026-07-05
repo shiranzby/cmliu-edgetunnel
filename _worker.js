@@ -117,10 +117,30 @@ export default {
 					today.setHours(0, 0, 0, 0);
 					const format = url.searchParams.get('clash') || url.searchParams.get('singbox') ? 'clash' : (url.searchParams.get('format') || '');
 					
+					// ===== 允许 URL 参数覆盖配置 (Web 管理页提交) =====
+					const urlADD = url.searchParams.get('ADD') || '';
+					const urlDLS = parseFloat(url.searchParams.get('DLS')) || 0;
+					const effectiveADD = urlADD || ADD; // URL 参数优先于 env var
+					const effectiveDLS = urlDLS || DLS;
+					
+					// JSON API: 返回节点列表
+					if (url.searchParams.has('json')) {
+						const prefNodes = await fetchPreferredNodes(userID, host, effectiveADD, effectiveDLS);
+						const fallNodes = await fetchFallbackNodes(userID, host, sub, RproxyIP);
+						return new Response(JSON.stringify({
+							preferred: prefNodes.map(n => ({ name: n.name, server: n.server, port: n.port })),
+							fallback: fallNodes.map(n => ({ name: n.name, server: n.server, port: n.port })),
+							config: { ADD: effectiveADD || '(未设置)', DLS: effectiveDLS }
+						}), {
+							status: 200,
+							headers: { "Content-Type": "application/json;charset=utf-8", "Access-Control-Allow-Origin": "*" }
+						});
+					}
+					
 					// Clash subscription: detect by query param or User-Agent
 					const isClashClient = url.searchParams.has('clash') || (userAgent && (userAgent.includes('clash') || userAgent.includes('verge') || userAgent.includes('clashmeta') || userAgent.includes('nyanpasu') || userAgent.includes('cfw')) && !userAgent.includes('mozilla'));
 					if (isClashClient) {
-						const clashYaml = await generateClashConfig(userID, host, sub, RproxyIP);
+						const clashYaml = await generateClashConfig(userID, host, sub, RproxyIP, effectiveADD, effectiveDLS);
 						return new Response(clashYaml, {
 							status: 200,
 							headers: {
@@ -163,101 +183,163 @@ export default {
 <title>Edgetunnel - 订阅管理</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background:linear-gradient(135deg,#0f0c29,#302b63,#24243e);min-height:100vh;display:flex;justify-content:center;align-items:center;padding:20px;color:#e0e0e0}
-.container{max-width:600px;width:100%;background:rgba(255,255,255,.05);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-radius:20px;padding:32px;border:1px solid rgba(255,255,255,.1);box-shadow:0 25px 50px -12px rgba(0,0,0,.5)}
-.header{text-align:center;margin-bottom:24px}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background:linear-gradient(135deg,#0f0c29,#302b63,#24243e);min-height:100vh;display:flex;justify-content:center;align-items:flex-start;padding:20px;color:#e0e0e0}
+.container{max-width:680px;width:100%;background:rgba(255,255,255,.05);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-radius:20px;padding:32px;margin-top:10px;border:1px solid rgba(255,255,255,.1);box-shadow:0 25px 50px -12px rgba(0,0,0,.5)}
+.header{text-align:center;margin-bottom:20px}
 .header h1{font-size:22px;font-weight:700;background:linear-gradient(135deg,#667eea,#764ba2);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
 .header p{font-size:13px;color:rgba(255,255,255,.5);margin-top:4px}
-.status{display:flex;align-items:center;justify-content:center;gap:6px;margin-bottom:20px;font-size:13px;color:rgba(255,255,255,.6);flex-wrap:wrap}
-.status-dot{width:8px;height:8px;border-radius:50%;background:#22c55e;animation:pulse 2s infinite}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 .info-card{background:rgba(255,255,255,.05);border-radius:12px;padding:16px;margin-bottom:16px;border:1px solid rgba(255,255,255,.06)}
 .info-row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;font-size:13px;border-bottom:1px solid rgba(255,255,255,.04)}
 .info-row:last-child{border-bottom:none}
 .info-label{color:rgba(255,255,255,.5)}
 .info-value{color:#e0e0e0;font-family:'SF Mono','Fira Code','Consolas',monospace;font-size:12px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right}
-.qr-section{display:flex;justify-content:center;margin-bottom:16px}
-.qr-card{background:#fff;border-radius:12px;padding:12px;text-align:center}
-.qr-card img{width:160px;height:160px;display:block;border-radius:4px}
-.qr-card .qr-label{color:#999;font-size:11px;margin-top:6px}
-.sub-card{background:rgba(255,255,255,.05);border-radius:12px;padding:16px;margin-bottom:12px;border:1px solid rgba(255,255,255,.06);transition:all .2s}
-.sub-card:hover{border-color:rgba(102,126,234,.3)}
-.sub-card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.node-section{margin-bottom:16px}
+.node-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;cursor:pointer;user-select:none}
+.node-header h3{font-size:14px;font-weight:600}
+.node-badge{font-size:10px;padding:2px 10px;border-radius:10px}
+.node-badge.pref{background:rgba(34,197,94,.2);color:#22c55e}
+.node-badge.fall{background:rgba(251,146,60,.2);color:#fb923c}
+.node-list{max-height:200px;overflow-y:auto;background:rgba(0,0,0,.2);border-radius:8px;padding:8px}
+.node-list.collapsed{display:none}
+.node-item{display:flex;justify-content:space-between;padding:4px 8px;font-size:11px;font-family:'SF Mono','Consolas',monospace;color:rgba(255,255,255,.6);border-bottom:1px solid rgba(255,255,255,.04)}
+.node-item:last-child{border-bottom:none}
+.node-item .server{color:rgba(255,255,255,.7)}
+.config-card{background:rgba(255,255,255,.05);border-radius:12px;padding:16px;margin-bottom:16px;border:1px solid rgba(255,255,255,.06)}
+.config-card label{display:block;font-size:12px;color:rgba(255,255,255,.5);margin-bottom:4px;margin-top:10px}
+.config-card label:first-child{margin-top:0}
+.config-card input{width:100%;padding:8px 12px;border:1px solid rgba(255,255,255,.1);border-radius:6px;background:rgba(0,0,0,.3);color:#e0e0e0;font-size:13px;font-family:'SF Mono','Consolas',monospace;outline:none;transition:border-color .2s}
+.config-card input:focus{border-color:#667eea}
+.config-card .hint{font-size:11px;color:rgba(255,255,255,.3);margin-top:4px}
+.config-card .btn-row{display:flex;gap:8px;margin-top:12px}
+.config-card .btn{flex:1;padding:8px;border:none;border-radius:6px;font-size:13px;font-weight:500;cursor:pointer;transition:all .2s;text-align:center;text-decoration:none;display:block}
+.btn-gen{background:linear-gradient(135deg,#667eea,#764ba2);color:#fff}
+.btn-gen:hover{transform:translateY(-1px);box-shadow:0 8px 25px -5px rgba(0,0,0,.3)}
+.btn-copy{background:linear-gradient(135deg,#f093fb,#f5576c);color:#fff}
+.btn-copy:hover{transform:translateY(-1px)}
+.sub-card{background:rgba(255,255,255,.05);border-radius:12px;padding:16px;margin-bottom:12px;border:1px solid rgba(255,255,255,.06)}
+.sub-card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
 .sub-card-title{font-size:14px;font-weight:600;color:#e0e0e0}
 .sub-card-badge{font-size:10px;padding:2px 8px;border-radius:10px;background:rgba(102,126,234,.2);color:#667eea}
-.sub-url{font-size:11px;color:rgba(255,255,255,.4);word-break:break-all;margin-bottom:10px;line-height:1.5;font-family:'SF Mono','Fira Code','Consolas',monospace}
-.copy-btn{width:100%;padding:10px;border:none;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;transition:all .2s;display:flex;align-items:center;justify-content:center;gap:6px}
+.sub-url{font-size:11px;color:rgba(255,255,255,.4);word-break:break-all;line-height:1.5;font-family:'SF Mono','Consolas',monospace}
+.copy-btn{width:100%;padding:8px;border:none;border-radius:8px;font-size:12px;font-weight:500;cursor:pointer;transition:all .2s;display:flex;align-items:center;justify-content:center;gap:6px;margin-top:6px}
 .copy-btn.vless{background:linear-gradient(135deg,#667eea,#764ba2);color:#fff}
 .copy-btn.clash{background:linear-gradient(135deg,#f093fb,#f5576c);color:#fff}
 .copy-btn.singbox{background:linear-gradient(135deg,#4facfe,#00f2fe);color:#fff}
-.copy-btn:hover{transform:translateY(-1px);box-shadow:0 8px 25px -5px rgba(0,0,0,.3)}
-.copy-btn:active{transform:translateY(0)}
+.copy-btn:hover{transform:translateY(-1px);box-shadow:0 5px 15px -5px rgba(0,0,0,.3)}
 .copy-btn.copied{background:linear-gradient(135deg,#22c55e,#16a34a)!important}
+.loading{text-align:center;padding:20px;color:rgba(255,255,255,.3);font-size:13px}
 .footer{text-align:center;margin-top:20px;font-size:11px;color:rgba(255,255,255,.3)}
 .footer a{color:rgba(102,126,234,.6);text-decoration:none}
-.footer a:hover{color:#667eea}
-@media(max-width:480px){.container{padding:20px}.info-value{max-width:160px}}
+@media(max-width:480px){.container{padding:16px}}
 </style>
 </head>
 <body>
-<div class="container">
+<div class="container" id="app">
   <div class="header">
     <h1>🔗 Edgetunnel</h1>
     <p>VLESS · 优选IP · 多格式订阅管理</p>
   </div>
-  <div class="status">
-    <span class="status-dot"></span>
-    <span>节点：<strong style="color:#22c55e">活跃</strong></span>
-    <span style="margin:0 6px;opacity:.3">|</span>
-    <span>ProxyIP：<strong style="color:#667eea">${RproxyIP}</strong></span>
-    <span style="margin:0 6px;opacity:.3">|</span>
-    <span>Auto：<strong style="color:#4facfe">${sub || '内置'}</strong></span>
-  </div>
   <div class="info-card">
-    <div class="info-row"><span class="info-label">UUID</span><span class="info-value" id="uuid">${userID}</span></div>
+    <div class="info-row"><span class="info-label">UUID</span><span class="info-value">${userID}</span></div>
     <div class="info-row"><span class="info-label">服务器</span><span class="info-value">${host}</span></div>
     <div class="info-row"><span class="info-label">端口</span><span class="info-value">443</span></div>
-    <div class="info-row"><span class="info-label">传输协议</span><span class="info-value">WebSocket</span></div>
-    <div class="info-row"><span class="info-label">TLS</span><span class="info-value">✓ 已启用</span></div>
+    <div class="info-row"><span class="info-label">传输协议</span><span class="info-value">WebSocket + TLS</span></div>
     <div class="info-row"><span class="info-label">订阅服务</span><span class="info-value">${sub || '内置'}</span></div>
   </div>
-  <div class="qr-section">
-    <div class="qr-card">
-      <img src="https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(baseUrl)}" alt="QR Code" onerror="this.style.display='none'">
-      <div class="qr-label">扫码获取 VLESS 订阅</div>
+  <div class="config-card">
+    <label>📡 手动添加优选 IP (ADD)</label>
+    <input id="addInput" placeholder="例: 1.2.3.4:443#HK优选, 5.6.7.8:2053#SG" />
+    <div class="hint">格式: IP:端口#名称，多个用逗号分隔。留空则全部使用备用节点</div>
+    <label>📊 测速下限 (DLS, Mbps)</label>
+    <input id="dlsInput" type="number" placeholder="例: 10 (低于 10Mbps 的节点将被过滤)" value="0" />
+    <div class="hint">0 表示不过滤，仅对 CSV 测速数据有效</div>
+    <div class="btn-row">
+      <button class="btn btn-gen" id="applyBtn">🔄 生成订阅</button>
+      <button class="btn btn-copy" id="copyClashBtn">📋 复制 Clash 链接</button>
     </div>
+    <div style="margin-top:8px;text-align:center;font-size:11px;color:rgba(255,255,255,.3);word-break:break-all" id="genUrl"></div>
+  </div>
+  <div id="nodesSection">
+    <div class="loading">⏳ 正在加载节点列表...</div>
   </div>
   <div class="sub-card">
     <div class="sub-card-header">
-      <span class="sub-card-title">📦 VLESS 订阅链接</span>
+      <span class="sub-card-title">📦 VLESS 通用订阅</span>
       <span class="sub-card-badge">通用</span>
     </div>
-    <div class="sub-url">${baseUrl}</div>
-    <button class="copy-btn vless" onclick="copyText('${baseUrl}',this)">📋 复制订阅链接</button>
-  </div>
-  <div class="sub-card">
-    <div class="sub-card-header">
-      <span class="sub-card-title">⚡ Clash Meta 订阅（优选+备用）</span>
-      <span class="sub-card-badge">Clash</span>
-    </div>
-    <div class="sub-url">${clashUrl}</div>
-    <button class="copy-btn clash" onclick="copyText('${clashUrl}',this)">📋 复制 Clash 订阅链接</button>
-  </div>
-  <div class="sub-card">
-    <div class="sub-card-header">
-      <span class="sub-card-title">🎯 Sing-box 订阅链接</span>
-      <span class="sub-card-badge">Sing-box</span>
-    </div>
-    <div class="sub-url">${singboxUrl}</div>
-    <button class="copy-btn singbox" onclick="copyText('${singboxUrl}',this)">📋 复制 Sing-box 订阅链接</button>
+    <div class="sub-url" id="vlessUrl">${baseUrl}</div>
+    <button class="copy-btn vless" onclick="copyText('${baseUrl}',this)">📋 复制</button>
   </div>
   <div class="footer">
-    <p>Powered by <a href="https://github.com/cmliu/edgetunnel" target="_blank">cmliu/edgetunnel</a> · <a href="https://github.com/cmliu/WorkerVless2sub" target="_blank">WorkerVless2sub</a></p>
+    <p>Powered by <a href="https://github.com/cmliu/edgetunnel" target="_blank">edgetunnel</a> + <a href="https://github.com/cmliu/WorkerVless2sub" target="_blank">WorkerVless2sub</a></p>
   </div>
 </div>
 <script>
-function copyText(text,btn){if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(function(){btn.textContent="✅ 已复制！";btn.classList.add("copied");setTimeout(function(){btn.textContent="📋 再复制一份";btn.classList.remove("copied")},2000)}).catch(function(){fallbackCopy(text,btn)})}else{fallbackCopy(text,btn)}}
-function fallbackCopy(text,btn){var ta=document.createElement("textarea");ta.value=text;ta.style.position="fixed";ta.style.left="-9999px";document.body.appendChild(ta);ta.select();try{document.execCommand("copy");btn.textContent="✅ 已复制！";btn.classList.add("copied");setTimeout(function(){btn.textContent="📋 再复制一份";btn.classList.remove("copied")},2000)}catch(e){alert("复制失败，请手动复制")}document.body.removeChild(ta)}
+const UUID="${userID}";
+const HOST="${host}";
+const BASE="${baseUrl}";
+const CLASH_BASE="${clashUrl.split('?')[0]}";
+
+async function loadNodes(){
+  const el=document.getElementById('nodesSection');
+  try{
+    const r=await fetch('?json',{headers:{'User-Agent':'Mozilla/5.0'}});
+    const data=await r.json();
+    const pref=data.preferred||[];
+    const fall=data.fallback||[];
+    const cfg=data.config||{};
+    if(cfg.ADD&&cfg.ADD!='(未设置)') document.getElementById('addInput').value=cfg.ADD;
+    if(cfg.DLS>0) document.getElementById('dlsInput').value=cfg.DLS;
+    let html='<div class="node-section"><div class="node-header" onclick="this.nextElementSibling.classList.toggle(\'collapsed\')"><h3>⭐ 优选节点 <span style="font-weight:400;font-size:12px;color:rgba(255,255,255,.3)">(点击展开/收起)</span></h3><span class="node-badge pref">'+pref.length+' 个</span></div><div class="node-list'+(pref.length>8?' collapsed':'')+'">'+
+      (pref.length?pref.map(n=>'<div class="node-item"><span>'+n.name+'</span><span class="server">'+n.server+':'+n.port+'</span></div>').join(''):'<div class="node-item"><span style="color:rgba(255,255,255,.3)">未配置优选 IP，请在上方添加</span></div>')+
+    '</div></div>';
+    html+='<div class="node-section"><div class="node-header" onclick="this.nextElementSibling.classList.toggle(\'collapsed\')"><h3>📦 备用节点 <span style="font-weight:400;font-size:12px;color:rgba(255,255,255,.3)">(点击展开/收起)</span></h3><span class="node-badge fall">'+fall.length+' 个</span></div><div class="node-list collapsed">'+
+      fall.map(n=>'<div class="node-item"><span>'+n.name+'</span><span class="server">'+n.server+':'+n.port+'</span></div>').join('')+
+    '</div></div>';
+    el.innerHTML=html;
+    updateUrl();
+  }catch(e){el.innerHTML='<div class="loading">❌ 加载失败</div>';}
+}
+
+function updateUrl(){
+  const add=encodeURIComponent(document.getElementById('addInput').value);
+  const dls=document.getElementById('dlsInput').value;
+  let params='?clash=vmess';
+  if(add) params+='&ADD='+add;
+  if(dls&&parseFloat(dls)>0) params+='&DLS='+dls;
+  const url='https://'+HOST+'/'+UUID+params;
+  document.getElementById('genUrl').textContent=url;
+  document.getElementById('genUrl').dataset.url=url;
+}
+
+document.getElementById('applyBtn').onclick=function(){
+  updateUrl();loadNodes();
+};
+
+document.getElementById('copyClashBtn').onclick=function(){
+  const url=document.getElementById('genUrl').dataset.url||document.getElementById('genUrl').textContent;
+  copyText(url,this);
+};
+
+document.getElementById('addInput').oninput=updateUrl;
+document.getElementById('dlsInput').oninput=updateUrl;
+
+function copyText(text,btn){
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(function(){
+      var orig=btn.textContent;btn.textContent="✅ 已复制";btn.classList.add("copied");
+      setTimeout(function(){btn.textContent=orig;btn.classList.remove("copied")},2000);
+    }).catch(function(){fallbackCopy(text,btn)});
+  }else{fallbackCopy(text,btn)}
+}
+function fallbackCopy(text,btn){
+  var ta=document.createElement("textarea");ta.value=text;ta.style.position="fixed";ta.style.left="-9999px";
+  document.body.appendChild(ta);ta.select();
+  try{document.execCommand("copy");btn.textContent="✅ 已复制";btn.classList.add("copied");setTimeout(function(){btn.textContent="📋 再复制一份";btn.classList.remove("copied")},2000)}
+  catch(e){alert("复制失败")}document.body.removeChild(ta);
+}
+
+loadNodes();
 </script>
 </body>
 </html>`;
@@ -1094,14 +1176,16 @@ function parseCSV(csvText, minSpeed = 0, defaultPort = 443) {
  * @param {string} hostName 
  * @returns {Promise<Array<{name:string, server:string, port:number, uuid:string, sni:string, path:string, fp:string}>>}
  */
-async function fetchPreferredNodes(userID, hostName) {
+async function fetchPreferredNodes(userID, hostName, urlADD, urlDLS) {
 	const nodes = [];
 	const defaultPorts = CFPORTS.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
 	const defaultPort = defaultPorts[0] || 443;
+	const effectiveADD = urlADD || ADD;
+	const effectiveDLS = urlDLS || DLS;
 	
 	// 1. Static ADD (静态优选IP)
-	if (ADD) {
-		const staticNodes = parseIPList(ADD, defaultPort);
+	if (effectiveADD) {
+		const staticNodes = parseIPList(effectiveADD, defaultPort);
 		for (const n of staticNodes) {
 			nodes.push({
 				name: n.name || `优选-${n.host}:${n.port}`,
@@ -1140,7 +1224,7 @@ async function fetchPreferredNodes(userID, hostName) {
 		try {
 			const resp = await fetch(ADDCSV, { headers: { 'User-Agent': 'CF-Workers-edgetunnel/cmliu' } });
 			const text = await resp.text();
-			const csvNodes = parseCSV(text, DLS, defaultPort);
+			const csvNodes = parseCSV(text, effectiveDLS, defaultPort);
 			for (const n of csvNodes) {
 				nodes.push({
 					name: `测速-${n.host}:${n.port}`,
@@ -1286,13 +1370,15 @@ function buildProxyYaml(proxies) {
 	return yaml;
 }
 
-async function generateClashConfig(userID, hostName, sub, RproxyIP) {
+async function generateClashConfig(userID, hostName, sub, RproxyIP, urlADD, urlDLS) {
 	if (typeof fetch != 'function') {
 		return generateBasicClashConfig(userID, hostName);
 	}
 	
 	// Phase 1: Fetch preferred nodes from WorkerVless2sub sources
-	const preferredNodes = await fetchPreferredNodes(userID, hostName);
+	const effectiveADD = urlADD || ADD;
+	const effectiveDLS = urlDLS || DLS;
+	const preferredNodes = await fetchPreferredNodes(userID, hostName, effectiveADD, effectiveDLS);
 	deduplicateNames(preferredNodes);
 	
 	// Phase 2: Fetch fallback nodes from SUB service
