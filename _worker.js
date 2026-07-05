@@ -1346,27 +1346,52 @@ function generateUUID() {
  * @param {number} defaultPort
  * @returns {Array<{host:string, port:number, name:string}>}
  */
+function parseHostPort(value, defaultPort = 443) {
+	let host = value.trim();
+	let port = defaultPort;
+	if (!host) return { host: '', port };
+
+	if (host.startsWith('[')) {
+		const closeIdx = host.indexOf(']');
+		if (closeIdx > 0) {
+			const bracketHost = host.slice(1, closeIdx).trim();
+			const rest = host.slice(closeIdx + 1).trim();
+			if (rest.startsWith(':')) {
+				const parsedPort = parseInt(rest.slice(1));
+				if (!isNaN(parsedPort) && parsedPort > 0 && parsedPort < 65536) port = parsedPort;
+			}
+			return { host: bracketHost, port };
+		}
+	}
+
+	const colonCount = (host.match(/:/g) || []).length;
+	if (colonCount === 1) {
+		const colonIdx = host.lastIndexOf(':');
+		const parsedPort = parseInt(host.slice(colonIdx + 1));
+		if (!isNaN(parsedPort) && parsedPort > 0 && parsedPort < 65536) {
+			port = parsedPort;
+			host = host.slice(0, colonIdx);
+		}
+	}
+
+	return { host, port };
+}
+
 function parseIPList(text, defaultPort = 443) {
 	const nodes = [];
 	if (!text) return nodes;
 	const items = text.split(',').map(s => s.trim()).filter(Boolean);
 	for (const item of items) {
 		let host = item;
-		let port = defaultPort;
 		let name = '';
 		const hashIdx = item.lastIndexOf('#');
 		if (hashIdx > 0) {
 			name = item.slice(hashIdx + 1).trim();
 			host = item.slice(0, hashIdx).trim();
 		}
-		const colonIdx = host.lastIndexOf(':');
-		if (colonIdx > 0) {
-			const parsedPort = parseInt(host.slice(colonIdx + 1));
-			if (!isNaN(parsedPort) && parsedPort > 0 && parsedPort < 65536) {
-				port = parsedPort;
-				host = host.slice(0, colonIdx);
-			}
-		}
+		const parsed = parseHostPort(host, defaultPort);
+		host = parsed.host;
+		const port = parsed.port;
 		if (host) nodes.push({ host, port, name: name || `${host}:${port}` });
 	}
 	return nodes;
@@ -1424,7 +1449,8 @@ async function fetchPreferredNodes(userID, hostName, urlADD, urlDLS) {
 				uuid: userID,
 				sni: hostName,
 				path: '/?ed=2048',
-				fp: 'chrome'
+				fp: 'chrome',
+				tls: true
 			});
 		}
 	}
@@ -1443,7 +1469,8 @@ async function fetchPreferredNodes(userID, hostName, urlADD, urlDLS) {
 					uuid: userID,
 					sni: hostName,
 					path: '/?ed=2048',
-					fp: 'chrome'
+					fp: 'chrome',
+					tls: true
 				});
 			}
 		} catch (e) { console.error('ADDAPI fetch error:', e); }
@@ -1463,7 +1490,8 @@ async function fetchPreferredNodes(userID, hostName, urlADD, urlDLS) {
 					uuid: userID,
 					sni: hostName,
 					path: '/?ed=2048',
-					fp: 'chrome'
+					fp: 'chrome',
+					tls: true
 				});
 			}
 		} catch (e) { console.error('ADDCSV fetch error:', e); }
@@ -1480,7 +1508,8 @@ async function fetchPreferredNodes(userID, hostName, urlADD, urlDLS) {
 				uuid: userID,
 				sni: hostName,
 				path: '/?ed=2048',
-				fp: 'chrome'
+				fp: 'chrome',
+				tls: false
 			});
 		}
 	}
@@ -1497,7 +1526,8 @@ async function fetchPreferredNodes(userID, hostName, urlADD, urlDLS) {
 					uuid: userID,
 					sni: hostName,
 					path: '/?ed=2048',
-					fp: 'chrome'
+					fp: 'chrome',
+					tls: false
 				});
 			}
 		} catch (e) { console.error('ADDNOTLSAPI error:', e); }
@@ -1556,7 +1586,7 @@ async function fetchFallbackNodes(userID, hostName, sub, RproxyIP) {
 				const fp = sp.get('fp') || 'chrome';
 				proxies.push({
 					name: name.replace(/[^a-zA-Z0-9\u4e00-\u9fff\-_() ]/g, '').trim() || `Node-${proxies.length + 1}`,
-					server, port: parseInt(port) || 443, uuid, sni, path, fp
+					server, port: parseInt(port) || 443, uuid, sni, path, fp, tls: true
 				});
 			} catch {}
 		}
@@ -1581,16 +1611,18 @@ function deduplicateNames(proxies) {
 function buildProxyYaml(proxies) {
 	let yaml = '';
 	for (const p of proxies) {
+		const enableTls = p.tls !== false;
 		yaml += `  - name: "${p.name}"
     type: vless
     server: "${p.server}"
     port: ${p.port}
     uuid: "${p.uuid}"
     network: ws
-    tls: true
-    servername: "${p.sni}"
+    tls: ${enableTls ? 'true' : 'false'}
+${enableTls ? `    servername: "${p.sni}"
     sni: "${p.sni}"
     client-fingerprint: "${p.fp}"
+` : ''}    udp: false
     ws-opts:
       path: "${p.path}"
       headers:
@@ -1598,6 +1630,11 @@ function buildProxyYaml(proxies) {
 `;
 	}
 	return yaml;
+}
+
+function buildProxyNameList(proxies) {
+	if (!proxies.length) return '      - DIRECT';
+	return proxies.map(p => `      - "${p.name}"`).join('\n');
 }
 
 async function generateClashConfig(userID, hostName, sub, RproxyIP, urlADD, urlDLS) {
@@ -1623,9 +1660,9 @@ async function generateClashConfig(userID, hostName, sub, RproxyIP, urlADD, urlD
 	const prefYaml = buildProxyYaml(preferredNodes);
 	const fallYaml = buildProxyYaml(fallbackNodes);
 	
-	const prefNames = preferredNodes.map(p => `"${p.name}"`).join('\n      - ');
-	const fallNames = fallbackNodes.map(p => `"${p.name}"`).join('\n      - ');
-	const allNames = [...preferredNodes, ...fallbackNodes].map(p => `"${p.name}"`).join('\n      - ');
+	const prefNames = buildProxyNameList(preferredNodes);
+	const fallNames = buildProxyNameList(fallbackNodes);
+	const allNames = buildProxyNameList([...preferredNodes, ...fallbackNodes]);
 	
 	let yaml = `mixed-port: 7890
 allow-lan: false
@@ -1653,12 +1690,12 @@ proxy-groups:
   - name: "优选"
     type: select
     proxies:
-      - ${prefNames || '- DIRECT'}
+${prefNames}
 
   - name: "备用"
     type: select
     proxies:
-      - ${fallNames || '- DIRECT'}
+${fallNames}
 
   - name: "自动选择"
     type: url-test
@@ -1666,7 +1703,7 @@ proxy-groups:
     interval: 300
     tolerance: 50
     proxies:
-      - ${allNames || '- DIRECT'}
+${allNames}
 
   - name: "故障转移"
     type: fallback
@@ -1674,7 +1711,7 @@ proxy-groups:
     interval: 300
     tolerance: 50
     proxies:
-      - ${allNames || '- DIRECT'}
+${allNames}
 
   - name: "Final"
     type: select
