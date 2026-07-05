@@ -123,14 +123,18 @@ export default {
 					const effectiveADD = urlADD || ADD; // URL 参数优先于 env var
 					const effectiveDLS = urlDLS || DLS;
 					
-					// JSON API: 返回节点列表
+					// JSON API: 返回节点列表 (仅解析 ADD，不请求外部服务以避免阻塞前端)
 					if (url.searchParams.has('json')) {
-						const prefNodes = await fetchPreferredNodes(userID, host, effectiveADD, effectiveDLS);
-						const fallNodes = await fetchFallbackNodes(userID, host, sub, RproxyIP);
+						const defaultPort = parseInt((CFPORTS || '443').split(',')[0]) || 443;
+						const prefNodes = parseIPList(effectiveADD, defaultPort).map(n => ({
+							name: n.name || n.host + ':' + n.port,
+							server: n.host,
+							port: n.port
+						}));
 						return new Response(JSON.stringify({
-							preferred: prefNodes.map(n => ({ name: n.name, server: n.server, port: n.port })),
-							fallback: fallNodes.map(n => ({ name: n.name, server: n.server, port: n.port })),
-							config: { ADD: effectiveADD || '(未设置)', DLS: effectiveDLS }
+							preferred: prefNodes,
+							fallback: [],
+							config: { ADD: effectiveADD || '(未设置)', DLS: effectiveDLS, UUID: userID, HOST: host }
 						}), {
 							status: 200,
 							headers: { "Content-Type": "application/json;charset=utf-8", "Access-Control-Allow-Origin": "*" }
@@ -180,166 +184,292 @@ export default {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Edgetunnel - 订阅管理</title>
+<title>Edgetunnel · 订阅管理</title>
 <style>
+:root {
+  --bg: #f4f8fd;
+  --card-bg: #ffffff;
+  --card-border: #e2e8f0;
+  --text-primary: #1e293b;
+  --text-secondary: #64748b;
+  --text-muted: #94a3b8;
+  --accent: #2563eb;
+  --accent-light: #3b82f6;
+  --accent-bg: #eff6ff;
+  --accent-border: #bfdbfe;
+  --success: #16a34a;
+  --success-bg: #f0fdf4;
+  --warning: #ea580c;
+  --shadow: 0 1px 3px 0 rgba(0,0,0,.06), 0 1px 2px -1px rgba(0,0,0,.04);
+  --shadow-md: 0 4px 6px -1px rgba(0,0,0,.06), 0 2px 4px -2px rgba(0,0,0,.04);
+  --radius: 12px;
+}
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background:linear-gradient(135deg,#0f0c29,#302b63,#24243e);min-height:100vh;display:flex;justify-content:center;align-items:flex-start;padding:20px;color:#e0e0e0}
-.container{max-width:680px;width:100%;background:rgba(255,255,255,.05);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-radius:20px;padding:32px;margin-top:10px;border:1px solid rgba(255,255,255,.1);box-shadow:0 25px 50px -12px rgba(0,0,0,.5)}
-.header{text-align:center;margin-bottom:20px}
-.header h1{font-size:22px;font-weight:700;background:linear-gradient(135deg,#667eea,#764ba2);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
-.header p{font-size:13px;color:rgba(255,255,255,.5);margin-top:4px}
-.info-card{background:rgba(255,255,255,.05);border-radius:12px;padding:16px;margin-bottom:16px;border:1px solid rgba(255,255,255,.06)}
-.info-row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;font-size:13px;border-bottom:1px solid rgba(255,255,255,.04)}
-.info-row:last-child{border-bottom:none}
-.info-label{color:rgba(255,255,255,.5)}
-.info-value{color:#e0e0e0;font-family:'SF Mono','Fira Code','Consolas',monospace;font-size:12px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right}
-.node-section{margin-bottom:16px}
-.node-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;cursor:pointer;user-select:none}
-.node-header h3{font-size:14px;font-weight:600}
-.node-badge{font-size:10px;padding:2px 10px;border-radius:10px}
-.node-badge.pref{background:rgba(34,197,94,.2);color:#22c55e}
-.node-badge.fall{background:rgba(251,146,60,.2);color:#fb923c}
-.node-list{max-height:200px;overflow-y:auto;background:rgba(0,0,0,.2);border-radius:8px;padding:8px}
-.node-list.collapsed{display:none}
-.node-item{display:flex;justify-content:space-between;padding:4px 8px;font-size:11px;font-family:'SF Mono','Consolas',monospace;color:rgba(255,255,255,.6);border-bottom:1px solid rgba(255,255,255,.04)}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'Noto Sans SC',sans-serif;
+  background:linear-gradient(180deg,#eef4ff 0%,#e4ecf9 30%,#f4f8fd 100%);
+  min-height:100vh;color:var(--text-primary);line-height:1.6;
+}
+.container{max-width:720px;width:100%;margin:0 auto;padding:24px 16px}
+.card{
+  background:var(--card-bg);border-radius:var(--radius);padding:20px;
+  margin-bottom:16px;border:1px solid var(--card-border);box-shadow:var(--shadow);
+  transition:box-shadow .2s;
+}
+.card:hover{box-shadow:var(--shadow-md)}
+.header{
+  text-align:center;padding:32px 20px 20px;
+  background:linear-gradient(135deg,#2563eb,#1d4ed8);border-radius:var(--radius);
+  margin-bottom:20px;color:#fff;box-shadow:0 4px 14px -4px rgba(37,99,235,.3);
+}
+.header .icon{font-size:32px;margin-bottom:8px}
+.header h1{font-size:22px;font-weight:700;letter-spacing:-.5px}
+.header p{font-size:13px;opacity:.85;margin-top:4px}
+.status-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+@media(min-width:500px){.status-grid{grid-template-columns:repeat(4,1fr)}}
+.status-item{background:var(--accent-bg);border-radius:8px;padding:12px;border:1px solid var(--accent-border)}
+.status-item .label{font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px}
+.status-item .value{font-size:13px;font-weight:600;color:var(--accent);font-family:'SF Mono','Fira Code','Consolas',monospace;word-break:break-all}
+.section-title{font-size:14px;font-weight:600;color:var(--text-primary);margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.section-title::before{content:'';width:3px;height:16px;background:var(--accent);border-radius:2px;flex-shrink:0}
+.sub-url-box{background:var(--accent-bg);border:1px solid var(--accent-border);border-radius:8px;padding:14px;margin-bottom:12px}
+.sub-url-box .url{font-family:'SF Mono','Fira Code','Consolas',monospace;font-size:12px;color:var(--accent);word-break:break-all;line-height:1.6}
+.sub-url-box .hint{font-size:11px;color:var(--text-muted);margin-top:6px;display:flex;align-items:center;gap:4px}
+.format-tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.format-tag{font-size:10px;padding:3px 10px;border-radius:12px;background:#fff;border:1px solid var(--accent-border);color:var(--text-secondary)}
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  padding:10px 20px;border:none;border-radius:8px;font-size:13px;font-weight:500;
+  cursor:pointer;transition:all .2s;text-decoration:none;
+}
+.btn-primary{background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;box-shadow:0 2px 8px -2px rgba(37,99,235,.3)}
+.btn-primary:hover{background:linear-gradient(135deg,#1d4ed8,#1e40af);box-shadow:0 4px 12px -2px rgba(37,99,235,.4);transform:translateY(-1px)}
+.btn-outline{background:#fff;color:var(--accent);border:1px solid var(--accent-border)}
+.btn-outline:hover{background:var(--accent-bg);border-color:var(--accent)}
+.btn-sm{padding:6px 14px;font-size:12px}
+.btn-block{width:100%;justify-content:center}
+.btn-row{display:flex;gap:8px;flex-wrap:wrap}
+.btn.copied{background:var(--success)!important;border-color:var(--success)!important;color:#fff!important}
+.form-group{margin-bottom:12px}.form-group:last-child{margin-bottom:0}
+.form-label{display:block;font-size:12px;font-weight:500;color:var(--text-secondary);margin-bottom:4px}
+.form-input{
+  width:100%;padding:10px 12px;border:1px solid var(--card-border);border-radius:8px;
+  background:#fff;color:var(--text-primary);font-size:13px;
+  font-family:'SF Mono','Fira Code','Consolas',monospace;outline:none;
+  transition:border-color .2s,box-shadow .2s;
+}
+.form-input:focus{border-color:var(--accent-light);box-shadow:0 0 0 3px rgba(37,99,235,.1)}
+.form-input::placeholder{color:var(--text-muted)}
+.form-hint{font-size:11px;color:var(--text-muted);margin-top:4px}
+.node-section{margin-bottom:10px}
+.node-header{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:10px 14px;background:var(--accent-bg);border:1px solid var(--accent-border);
+  border-radius:8px;cursor:pointer;user-select:none;transition:background .2s;
+}
+.node-header:hover{background:#dbeafe}
+.node-header h3{font-size:13px;font-weight:600;color:var(--text-primary)}
+.badge{font-size:10px;padding:2px 10px;border-radius:10px;font-weight:600}
+.badge-pref{background:#dcfce7;color:var(--success)}
+.badge-fallback{background:var(--accent-bg);color:var(--accent)}
+.nodelist{
+  max-height:240px;overflow-y:auto;border:1px solid var(--card-border);
+  border-top:none;border-radius:0 0 8px 8px;background:#f8fafc;
+}
+.nodelist.collapsed{display:none}
+.node-item{
+  display:flex;justify-content:space-between;padding:6px 14px;font-size:11px;
+  font-family:'SF Mono','Fira Code','Consolas',monospace;color:var(--text-secondary);
+  border-bottom:1px solid #f1f5f9;
+}
 .node-item:last-child{border-bottom:none}
-.node-item .server{color:rgba(255,255,255,.7)}
-.config-card{background:rgba(255,255,255,.05);border-radius:12px;padding:16px;margin-bottom:16px;border:1px solid rgba(255,255,255,.06)}
-.config-card label{display:block;font-size:12px;color:rgba(255,255,255,.5);margin-bottom:4px;margin-top:10px}
-.config-card label:first-child{margin-top:0}
-.config-card input{width:100%;padding:8px 12px;border:1px solid rgba(255,255,255,.1);border-radius:6px;background:rgba(0,0,0,.3);color:#e0e0e0;font-size:13px;font-family:'SF Mono','Consolas',monospace;outline:none;transition:border-color .2s}
-.config-card input:focus{border-color:#667eea}
-.config-card .hint{font-size:11px;color:rgba(255,255,255,.3);margin-top:4px}
-.config-card .btn-row{display:flex;gap:8px;margin-top:12px}
-.config-card .btn{flex:1;padding:8px;border:none;border-radius:6px;font-size:13px;font-weight:500;cursor:pointer;transition:all .2s;text-align:center;text-decoration:none;display:block}
-.btn-gen{background:linear-gradient(135deg,#667eea,#764ba2);color:#fff}
-.btn-gen:hover{transform:translateY(-1px);box-shadow:0 8px 25px -5px rgba(0,0,0,.3)}
-.btn-copy{background:linear-gradient(135deg,#f093fb,#f5576c);color:#fff}
-.btn-copy:hover{transform:translateY(-1px)}
-.sub-card{background:rgba(255,255,255,.05);border-radius:12px;padding:16px;margin-bottom:12px;border:1px solid rgba(255,255,255,.06)}
-.sub-card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
-.sub-card-title{font-size:14px;font-weight:600;color:#e0e0e0}
-.sub-card-badge{font-size:10px;padding:2px 8px;border-radius:10px;background:rgba(102,126,234,.2);color:#667eea}
-.sub-url{font-size:11px;color:rgba(255,255,255,.4);word-break:break-all;line-height:1.5;font-family:'SF Mono','Consolas',monospace}
-.copy-btn{width:100%;padding:8px;border:none;border-radius:8px;font-size:12px;font-weight:500;cursor:pointer;transition:all .2s;display:flex;align-items:center;justify-content:center;gap:6px;margin-top:6px}
-.copy-btn.vless{background:linear-gradient(135deg,#667eea,#764ba2);color:#fff}
-.copy-btn.clash{background:linear-gradient(135deg,#f093fb,#f5576c);color:#fff}
-.copy-btn.singbox{background:linear-gradient(135deg,#4facfe,#00f2fe);color:#fff}
-.copy-btn:hover{transform:translateY(-1px);box-shadow:0 5px 15px -5px rgba(0,0,0,.3)}
-.copy-btn.copied{background:linear-gradient(135deg,#22c55e,#16a34a)!important}
-.loading{text-align:center;padding:20px;color:rgba(255,255,255,.3);font-size:13px}
-.footer{text-align:center;margin-top:20px;font-size:11px;color:rgba(255,255,255,.3)}
-.footer a{color:rgba(102,126,234,.6);text-decoration:none}
-@media(max-width:480px){.container{padding:16px}}
+.node-item .server{color:var(--accent);font-weight:500}
+.loading{text-align:center;padding:30px;color:var(--text-muted);font-size:13px}
+.loading .spinner{
+  width:20px;height:20px;border:2px solid var(--accent-border);
+  border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite;
+  margin:0 auto 8px;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+.empty-state{text-align:center;padding:20px;color:var(--text-muted);font-size:12px}
+.empty-state .icon{font-size:28px;margin-bottom:6px;opacity:.6}
+.footer{text-align:center;padding:20px;font-size:11px;color:var(--text-muted)}
+.footer a{color:var(--accent);text-decoration:none}
+.footer a:hover{text-decoration:underline}
+@media(max-width:480px){.container{padding:12px 8px}.card{padding:14px}.header{padding:24px 16px 16px}}
 </style>
 </head>
 <body>
-<div class="container" id="app">
+<div class="container">
   <div class="header">
-    <h1>🔗 Edgetunnel</h1>
-    <p>VLESS · 优选IP · 多格式订阅管理</p>
+    <div class="icon">🔗</div>
+    <h1>Edgetunnel</h1>
+    <p>VLESS over WebSocket · Cloudflare Workers</p>
   </div>
-  <div class="info-card">
-    <div class="info-row"><span class="info-label">UUID</span><span class="info-value">${userID}</span></div>
-    <div class="info-row"><span class="info-label">服务器</span><span class="info-value">${host}</span></div>
-    <div class="info-row"><span class="info-label">端口</span><span class="info-value">443</span></div>
-    <div class="info-row"><span class="info-label">传输协议</span><span class="info-value">WebSocket + TLS</span></div>
-    <div class="info-row"><span class="info-label">订阅服务</span><span class="info-value">${sub || '内置'}</span></div>
+
+  <div class="card">
+    <div class="section-title">服务状态</div>
+    <div class="status-grid">
+      <div class="status-item"><div class="label">UUID</div><div class="value">${userID.slice(0,13)}...</div></div>
+      <div class="status-item"><div class="label">服务器</div><div class="value">${host}</div></div>
+      <div class="status-item"><div class="label">端口 / 传输</div><div class="value">443 · WS+TLS</div></div>
+      <div class="status-item"><div class="label">订阅服务</div><div class="value">${sub || '内置'}</div></div>
+    </div>
   </div>
-  <div class="config-card">
-    <label>📡 手动添加优选 IP (ADD)</label>
-    <input id="addInput" placeholder="例: 1.2.3.4:443#HK优选, 5.6.7.8:2053#SG" />
-    <div class="hint">格式: IP:端口#名称，多个用逗号分隔。留空则全部使用备用节点</div>
-    <label>📊 测速下限 (DLS, Mbps)</label>
-    <input id="dlsInput" type="number" placeholder="例: 10 (低于 10Mbps 的节点将被过滤)" value="0" />
-    <div class="hint">0 表示不过滤，仅对 CSV 测速数据有效</div>
+
+  <div class="card">
+    <div class="section-title">订阅链接</div>
+    <div class="sub-url-box">
+      <div class="url" id="subUrl">${baseUrl}</div>
+      <div class="hint">💡 自动识别客户端：Clash Meta / Sing-box / v2rayN / Shadowrocket 等</div>
+      <div class="format-tags">
+        <span class="format-tag">Clash Meta</span>
+        <span class="format-tag">Sing-box</span>
+        <span class="format-tag">v2rayN</span>
+        <span class="format-tag">Nekoray</span>
+        <span class="format-tag">Shadowrocket</span>
+      </div>
+    </div>
     <div class="btn-row">
-      <button class="btn btn-gen" id="applyBtn">🔄 生成订阅</button>
-      <button class="btn btn-copy" id="copyClashBtn">📋 复制 Clash 链接</button>
+      <button class="btn btn-primary" id="copySubBtn">📋 复制订阅链接</button>
+      <button class="btn btn-outline" id="qrBtn">📱 二维码</button>
     </div>
-    <div style="margin-top:8px;text-align:center;font-size:11px;color:rgba(255,255,255,.3);word-break:break-all" id="genUrl"></div>
   </div>
-  <div id="nodesSection">
-    <div class="loading">⏳ 正在加载节点列表...</div>
-  </div>
-  <div class="sub-card">
-    <div class="sub-card-header">
-      <span class="sub-card-title">📦 VLESS 通用订阅</span>
-      <span class="sub-card-badge">通用</span>
+
+  <div class="card">
+    <div class="section-title">优选 IP 配置</div>
+    <div class="form-group">
+      <label class="form-label">手动添加优选 IP (ADD)</label>
+      <input class="form-input" id="addInput" placeholder="例: 1.2.3.4:443#HK优选, 5.6.7.8:2053#SG">
+      <div class="form-hint">格式: IP:端口#名称，多个用逗号分隔。留空则使用 SUB 服务提供的节点。</div>
     </div>
-    <div class="sub-url" id="vlessUrl">${baseUrl}</div>
-    <button class="copy-btn vless" onclick="copyText('${baseUrl}',this)">📋 复制</button>
+    <div class="form-group">
+      <label class="form-label">测速下限 (DLS, Mbps)</label>
+      <input class="form-input" id="dlsInput" type="number" placeholder="0 表示不过滤" value="0">
+      <div class="form-hint">仅对 CSV 测速数据源生效，低于此速度的节点将被过滤。</div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-primary" id="applyBtn">🔄 刷新节点列表</button>
+      <button class="btn btn-outline" id="copyClashBtn">📋 复制 Clash 链接</button>
+    </div>
+    <div style="margin-top:8px;font-size:11px;color:var(--text-muted);word-break:break-all" id="genUrl"></div>
   </div>
+
+  <div class="card">
+    <div class="section-title">节点列表</div>
+    <div id="nodesSection">
+      <div class="loading">
+        <div class="spinner"></div>
+        正在加载节点列表...
+      </div>
+    </div>
+  </div>
+
   <div class="footer">
-    <p>Powered by <a href="https://github.com/cmliu/edgetunnel" target="_blank">edgetunnel</a> + <a href="https://github.com/cmliu/WorkerVless2sub" target="_blank">WorkerVless2sub</a></p>
+    Powered by <a href="https://github.com/cmliu/edgetunnel" target="_blank">edgetunnel</a>
   </div>
 </div>
+
 <script>
-const UUID="${userID}";
-const HOST="${host}";
-const BASE="${baseUrl}";
-const CLASH_BASE="${clashUrl.split('?')[0]}";
+(function(){
+  var UUID='${userID}';
+  var HOST='${host}';
+  var BASE='${baseUrl}';
 
-async function loadNodes(){
-  const el=document.getElementById('nodesSection');
-  try{
-    const r=await fetch('?json',{headers:{'User-Agent':'Mozilla/5.0'}});
-    const data=await r.json();
-    const pref=data.preferred||[];
-    const fall=data.fallback||[];
-    const cfg=data.config||{};
-    if(cfg.ADD&&cfg.ADD!='(未设置)') document.getElementById('addInput').value=cfg.ADD;
-    if(cfg.DLS>0) document.getElementById('dlsInput').value=cfg.DLS;
-    let html='<div class="node-section"><div class="node-header" onclick="this.nextElementSibling.classList.toggle(\'collapsed\')"><h3>⭐ 优选节点 <span style="font-weight:400;font-size:12px;color:rgba(255,255,255,.3)">(点击展开/收起)</span></h3><span class="node-badge pref">'+pref.length+' 个</span></div><div class="node-list'+(pref.length>8?' collapsed':'')+'">'+
-      (pref.length?pref.map(n=>'<div class="node-item"><span>'+n.name+'</span><span class="server">'+n.server+':'+n.port+'</span></div>').join(''):'<div class="node-item"><span style="color:rgba(255,255,255,.3)">未配置优选 IP，请在上方添加</span></div>')+
-    '</div></div>';
-    html+='<div class="node-section"><div class="node-header" onclick="this.nextElementSibling.classList.toggle(\'collapsed\')"><h3>📦 备用节点 <span style="font-weight:400;font-size:12px;color:rgba(255,255,255,.3)">(点击展开/收起)</span></h3><span class="node-badge fall">'+fall.length+' 个</span></div><div class="node-list collapsed">'+
-      fall.map(n=>'<div class="node-item"><span>'+n.name+'</span><span class="server">'+n.server+':'+n.port+'</span></div>').join('')+
-    '</div></div>';
-    el.innerHTML=html;
+  function copyText(text,btn,orig){
+    var origT=orig||btn.textContent;
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+      navigator.clipboard.writeText(text).then(function(){
+        btn.textContent='✅ 已复制';btn.classList.add('copied');
+        setTimeout(function(){btn.textContent=origT;btn.classList.remove('copied')},2000);
+      }).catch(function(){fallbackCopy(text,btn,origT)});
+    }else{fallbackCopy(text,btn,origT)}
+  }
+
+  function fallbackCopy(text,btn,orig){
+    var ta=document.createElement('textarea');ta.value=text;
+    ta.style.cssText='position:fixed;left:-9999px';document.body.appendChild(ta);ta.select();
+    try{document.execCommand('copy');btn.textContent='✅ 已复制';btn.classList.add('copied');
+      setTimeout(function(){btn.textContent=orig;btn.classList.remove('copied')},2000);
+    }catch(e){alert('复制失败，请手动复制')}
+    document.body.removeChild(ta)
+  }
+
+  document.getElementById('copySubBtn').onclick=function(){
+    copyText(BASE,this,'📋 复制订阅链接')
+  };
+
+  document.getElementById('qrBtn').onclick=function(){
+    var exist=document.getElementById('qrModal');
+    if(exist){exist.remove();return}
+    var modal=document.createElement('div');
+    modal.id='qrModal';
+    modal.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:1000';
+    modal.onclick=function(e){if(e.target===modal)modal.remove()};
+    var box=document.createElement('div');
+    box.style.cssText='background:#fff;border-radius:16px;padding:28px;text-align:center;max-width:90vw;box-shadow:0 20px 60px rgba(0,0,0,.12)';
+    box.innerHTML='<h3 style="margin-bottom:16px;font-size:16px;color:#1e293b;font-weight:600">📱 扫描二维码订阅</h3>'+
+      '<img src="https://api.qrserver.com/v1/create-qr-code/?size=220x220&data='+encodeURIComponent(BASE)+'" style="width:220px;height:220px;border-radius:10px;background:#f8fafc" onerror="var fb=document.getElementById(\'qrFallback\');if(fb)fb.style.display=\'block\';this.style.display=\'none\'">'+
+      '<div id="qrFallback" style="display:none;padding:20px;color:#94a3b8;font-size:13px">二维码加载失败<br>请直接复制订阅链接</div>'+
+      '<p style="margin-top:12px;font-size:11px;color:#94a3b8;word-break:break-all">'+BASE+'</p>';
+    modal.appendChild(box);
+    document.body.appendChild(modal)
+  };
+
+  function updateUrl(){
+    var add=encodeURIComponent(document.getElementById('addInput').value);
+    var dls=document.getElementById('dlsInput').value;
+    var params='?clash=vmess';
+    if(add)params+='&ADD='+add;
+    if(dls&&parseFloat(dls)>0)params+='&DLS='+dls;
+    var url='https://'+HOST+'/'+UUID+params;
+    document.getElementById('genUrl').textContent=url;
+    document.getElementById('genUrl').dataset.url=url
+  }
+
+  async function loadNodes(){
+    var el=document.getElementById('nodesSection');
+    try{
+      var r=await fetch('?json',{headers:{'User-Agent':'Mozilla/5.0'}});
+      var data=await r.json();
+      var pref=data.preferred||[];
+      var cfg=data.config||{};
+      if(cfg.ADD&&cfg.ADD!=='(未设置)')document.getElementById('addInput').value=cfg.ADD;
+      if(cfg.DLS>0)document.getElementById('dlsInput').value=cfg.DLS;
+      var html='';
+      html+='<div class="node-section"><div class="node-header" onclick="var nl=this.nextElementSibling;nl.classList.toggle(\'collapsed\')"><h3>⭐ 优选节点</h3><span class="badge badge-pref">'+pref.length+' 个</span></div><div class="nodelist'+(pref.length>8?' collapsed':'')+'">';
+      if(pref.length){
+        for(var i=0;i<pref.length;i++){
+          html+='<div class="node-item"><span>'+pref[i].name+'</span><span class="server">'+pref[i].server+':'+pref[i].port+'</span></div>'
+        }
+      }else{
+        html+='<div class="empty-state"><div class="icon">📭</div>暂未配置优选 IP<br><span style="font-size:10px">在上方输入 IP 地址后点击刷新即可显示</span></div>'
+      }
+      html+='</div></div>';
+      el.innerHTML=html;
+      updateUrl()
+    }catch(e){
+      el.innerHTML='<div class="loading" style="color:#ef4444">❌ 加载失败: 请检查网络连接</div>'
+    }
+  }
+
+  document.getElementById('applyBtn').onclick=function(){
+    var btn=this,orig=btn.textContent;
+    btn.textContent='⏳ 加载中...';btn.disabled=true;
     updateUrl();
-  }catch(e){el.innerHTML='<div class="loading">❌ 加载失败</div>';}
-}
+    loadNodes().then(function(){btn.textContent=orig;btn.disabled=false})
+  };
 
-function updateUrl(){
-  const add=encodeURIComponent(document.getElementById('addInput').value);
-  const dls=document.getElementById('dlsInput').value;
-  let params='?clash=vmess';
-  if(add) params+='&ADD='+add;
-  if(dls&&parseFloat(dls)>0) params+='&DLS='+dls;
-  const url='https://'+HOST+'/'+UUID+params;
-  document.getElementById('genUrl').textContent=url;
-  document.getElementById('genUrl').dataset.url=url;
-}
+  document.getElementById('copyClashBtn').onclick=function(){
+    updateUrl();
+    var url=document.getElementById('genUrl').dataset.url||document.getElementById('genUrl').textContent;
+    copyText(url,this,'📋 复制 Clash 链接')
+  };
 
-document.getElementById('applyBtn').onclick=function(){
-  updateUrl();loadNodes();
-};
-
-document.getElementById('copyClashBtn').onclick=function(){
-  const url=document.getElementById('genUrl').dataset.url||document.getElementById('genUrl').textContent;
-  copyText(url,this);
-};
-
-document.getElementById('addInput').oninput=updateUrl;
-document.getElementById('dlsInput').oninput=updateUrl;
-
-function copyText(text,btn){
-  if(navigator.clipboard&&navigator.clipboard.writeText){
-    navigator.clipboard.writeText(text).then(function(){
-      var orig=btn.textContent;btn.textContent="✅ 已复制";btn.classList.add("copied");
-      setTimeout(function(){btn.textContent=orig;btn.classList.remove("copied")},2000);
-    }).catch(function(){fallbackCopy(text,btn)});
-  }else{fallbackCopy(text,btn)}
-}
-function fallbackCopy(text,btn){
-  var ta=document.createElement("textarea");ta.value=text;ta.style.position="fixed";ta.style.left="-9999px";
-  document.body.appendChild(ta);ta.select();
-  try{document.execCommand("copy");btn.textContent="✅ 已复制";btn.classList.add("copied");setTimeout(function(){btn.textContent="📋 再复制一份";btn.classList.remove("copied")},2000)}
-  catch(e){alert("复制失败")}document.body.removeChild(ta);
-}
-
-loadNodes();
+  document.getElementById('addInput').oninput=updateUrl;
+  document.getElementById('dlsInput').oninput=updateUrl;
+  loadNodes()
+})();
 </script>
 </body>
 </html>`;
