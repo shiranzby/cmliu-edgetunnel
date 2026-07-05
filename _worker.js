@@ -89,28 +89,18 @@ export default {
 			if (!upgradeHeader || upgradeHeader !== 'websocket') {
 				// const url = new URL(request.url);
 				switch (url.pathname) {
-				case '/':
-					// Root path: auto-detect client type
+				case '/': {
 					const rootHost = request.headers.get('Host') || url.host;
 					if (userAgent && userAgent.includes('mozilla')) {
-						// Browser: redirect to HTML page
 						return new Response(null, {
 							status: 301,
-							headers: {
-								"Location": `https://${rootHost}/${userID}`,
-							}
-						});
-					} else {
-						// Subscription client: keep one clean entry URL and let /{UUID} auto-detect client format.
-						return new Response(null, {
-							status: 301,
-							headers: {
-								"Location": `https://${rootHost}/${userID}`,
-							}
+							headers: { "Location": `https://${rootHost}/${userID}` }
 						});
 					}
+					return await handleSubscriptionRequest(url, userAgent, userID, rootHost, sub, RproxyIP);
+				}
 				case `/${userID}`: {
-					const host = request.headers.get('Host');
+					const host = request.headers.get('Host') || url.host;
 					const now = Date.now();
 					const timestamp = Math.floor(now / 1000);
 					const today = new Date(now);
@@ -145,34 +135,14 @@ export default {
 						});
 					}
 					
-					// Clash subscription: detect by query param or User-Agent
-					const isClashClient = url.searchParams.has('clash') || (userAgent && (userAgent.includes('clash') || userAgent.includes('verge') || userAgent.includes('clashmeta') || userAgent.includes('nyanpasu') || userAgent.includes('cfw')) && !userAgent.includes('mozilla'));
-					if (isClashClient) {
+					if (isClashLikeClient(userAgent, url)) {
 						const clashYaml = await generateClashConfig(userID, host, sub, RproxyIP, effectiveADD, effectiveDLS);
-						return new Response(clashYaml, {
-							status: 200,
-							headers: {
-								"Content-Disposition": "attachment; filename=clash.yaml; filename*=utf-8''clash.yaml",
-								"Content-Type": "text/yaml;charset=utf-8",
-								"Profile-Update-Interval": "6",
-								"Subscription-Userinfo": `upload=0; download=${Math.floor(((now - today.getTime())/86400000) * 24 * 1099511627776)}; total=${24 * 1099511627776}; expire=${timestamp}`,
-							}
-						});
+						return createSubscriptionResponse(clashYaml, 'text/yaml;charset=utf-8', 'clash.yaml', now, today, timestamp);
 					}
 					
-					// Sing-box subscription: detect by query param or User-Agent
-					const isSingboxClient = url.searchParams.has('singbox') || url.searchParams.has('sing-box') || (userAgent && (userAgent.includes('singbox') || userAgent.includes('sing-box') || userAgent.includes('sfi')) && !userAgent.includes('mozilla'));
-					if (isSingboxClient) {
+					if (isSingboxClient(userAgent, url)) {
 						const singboxJson = generateSingboxConfig(userID, host);
-						return new Response(singboxJson, {
-							status: 200,
-							headers: {
-								"Content-Disposition": "attachment; filename=singbox.json; filename*=utf-8''singbox.json",
-								"Content-Type": "application/json;charset=utf-8",
-								"Profile-Update-Interval": "6",
-								"Subscription-Userinfo": `upload=0; download=${Math.floor(((now - today.getTime())/86400000) * 24 * 1099511627776)}; total=${24 * 1099511627776}; expire=${timestamp}`,
-							}
-						});
+						return createSubscriptionResponse(singboxJson, 'application/json;charset=utf-8', 'singbox.json', now, today, timestamp);
 					}
 					
 					const vlessConfig = await getVLESSConfig(userID, host, sub, userAgent, RproxyIP);
@@ -633,6 +603,47 @@ body{
  * 
  * @param {import("@cloudflare/workers-types").Request} request
  */
+function isClashLikeClient(userAgent, url) {
+	if (url.searchParams.has('clash')) return true;
+	if (!userAgent || userAgent.includes('mozilla')) return false;
+	return ['clash', 'mihomo', 'sparkle', 'verge', 'clashmeta', 'nyanpasu', 'cfw'].some(token => userAgent.includes(token));
+}
+
+function isSingboxClient(userAgent, url) {
+	if (url.searchParams.has('singbox') || url.searchParams.has('sing-box')) return true;
+	if (!userAgent || userAgent.includes('mozilla')) return false;
+	return userAgent.includes('singbox') || userAgent.includes('sing-box') || userAgent.includes('sfi');
+}
+
+function createSubscriptionResponse(content, contentType, filename, now, today, timestamp) {
+	return new Response(content, {
+		status: 200,
+		headers: {
+			"Content-Disposition": `attachment; filename=${filename}; filename*=utf-8''${filename}`,
+			"Content-Type": contentType,
+			"Profile-Update-Interval": "6",
+			"Subscription-Userinfo": `upload=0; download=${Math.floor(((now - today.getTime())/86400000) * 24 * 1099511627776)}; total=${24 * 1099511627776}; expire=${timestamp}`,
+		}
+	});
+}
+
+async function handleSubscriptionRequest(url, userAgent, userID, host, sub, RproxyIP) {
+	const now = Date.now();
+	const timestamp = Math.floor(now / 1000);
+	const today = new Date(now);
+	today.setHours(0, 0, 0, 0);
+	const urlADD = url.searchParams.get('ADD') || '';
+	const urlDLS = parseFloat(url.searchParams.get('DLS')) || 0;
+	if (isSingboxClient(userAgent, url)) {
+		return createSubscriptionResponse(generateSingboxConfig(userID, host), 'application/json;charset=utf-8', 'singbox.json', now, today, timestamp);
+	}
+	if (isClashLikeClient(userAgent, url)) {
+		return createSubscriptionResponse(await generateClashConfig(userID, host, sub, RproxyIP, urlADD, urlDLS), 'text/yaml;charset=utf-8', 'clash.yaml', now, today, timestamp);
+	}
+	const vlessConfig = await getVLESSConfig(userID, host, sub, userAgent, RproxyIP);
+	return createSubscriptionResponse(vlessConfig, 'text/plain;charset=utf-8', 'vless.txt', now, today, timestamp);
+}
+
 async function vlessOverWSHandler(request) {
 
 	/** @type {import("@cloudflare/workers-types").WebSocket[]} */
@@ -1682,39 +1693,44 @@ ${enableTls ? `    servername: "${p.sni}"
 	return yaml;
 }
 
+async function withTimeout(promise, timeoutMs, fallbackValue) {
+	try {
+		return await Promise.race([
+			promise,
+			new Promise(resolve => setTimeout(() => resolve(fallbackValue), timeoutMs))
+		]);
+	} catch (error) {
+		console.error('Timed operation failed:', error);
+		return fallbackValue;
+	}
+}
+
 function buildProxyNameList(proxies) {
 	if (!proxies.length) return '      - DIRECT';
 	return proxies.map(p => `      - "${p.name}"`).join('\n');
 }
 
 async function generateClashConfig(userID, hostName, sub, RproxyIP, urlADD, urlDLS) {
-	if (typeof fetch != 'function') {
-		return generateBasicClashConfig(userID, hostName);
-	}
-	
-	// Phase 1: Fetch preferred nodes from WorkerVless2sub sources
 	const effectiveADD = urlADD || ADD;
 	const effectiveDLS = urlDLS || DLS;
 	const preferredNodes = await fetchPreferredNodes(userID, hostName, effectiveADD, effectiveDLS);
 	deduplicateNames(preferredNodes);
-	
-	// Phase 2: Fetch fallback nodes from SUB service
-	const fallbackNodes = await fetchFallbackNodes(userID, hostName, sub, RproxyIP);
-	deduplicateNames(fallbackNodes);
-	
+	let fallbackNodes = [];
+	if (sub) {
+		fallbackNodes = await withTimeout(fetchFallbackNodes(userID, hostName, sub, RproxyIP), 4500, []);
+		deduplicateNames(fallbackNodes);
+	}
 	if (preferredNodes.length === 0 && fallbackNodes.length === 0) {
 		return generateBasicClashConfig(userID, hostName);
 	}
-	
-	// Phase 3: Build Clash YAML with two groups
-	const prefYaml = buildProxyYaml(preferredNodes);
-	const fallYaml = buildProxyYaml(fallbackNodes);
-	
-	const prefNames = buildProxyNameList(preferredNodes);
-	const fallNames = buildProxyNameList(fallbackNodes);
-	const allNames = buildProxyNameList([...preferredNodes, ...fallbackNodes]);
-	
-	let yaml = `mixed-port: 7890
+
+	const allNodes = [...preferredNodes, ...fallbackNodes];
+	const proxyYaml = buildProxyYaml(allNodes);
+	const preferredNames = buildProxyNameList(preferredNodes.length ? preferredNodes : allNodes);
+	const fallbackNames = buildProxyNameList(fallbackNodes.length ? fallbackNodes : allNodes);
+	const allNames = buildProxyNameList(allNodes);
+
+	return `mixed-port: 7890
 allow-lan: false
 bind-address: '*'
 mode: rule
@@ -1722,41 +1738,29 @@ log-level: info
 external-controller: 127.0.0.1:9090
 ipv6: true
 
-# ===== 优选节点 (WorkerVless2sub 优选IP) =====
 proxies:
-${prefYaml}
-# ===== 备用节点 (SUB 服务) =====
-${fallYaml}
+${proxyYaml}
 proxy-groups:
   - name: "PROXY"
     type: select
     proxies:
-      - "优选"
-      - "自动选择"
-      - "故障转移"
-      - "备用"
+      - "Auto"
+      - "Fallback"
+      - "Preferred"
       - DIRECT
 
-  - name: "优选"
+  - name: "Preferred"
     type: select
     proxies:
-${prefNames}
+${preferredNames}
 
-  - name: "备用"
+  - name: "Fallback"
     type: select
     proxies:
-${fallNames}
+${fallbackNames}
 
-  - name: "自动选择"
+  - name: "Auto"
     type: url-test
-    url: "http://www.gstatic.com/generate_204"
-    interval: 300
-    tolerance: 50
-    proxies:
-${allNames}
-
-  - name: "故障转移"
-    type: fallback
     url: "http://www.gstatic.com/generate_204"
     interval: 300
     tolerance: 50
@@ -1770,10 +1774,8 @@ ${allNames}
       - DIRECT
 
 rules:
-  - GEOIP,CN,DIRECT,no-resolve
-  - MATCH,Final
+  - MATCH,PROXY
 `;
-	return yaml;
 }
 
 /**
@@ -1816,8 +1818,7 @@ proxy-groups:
       - DIRECT
 
 rules:
-  - GEOIP,CN,DIRECT,no-resolve
-  - MATCH,Final
+  - MATCH,PROXY
 `;
 }
 
@@ -1973,7 +1974,7 @@ async function getVLESSConfig(userID, hostName, sub, userAgent, RproxyIP) {
 			return revertFakeInfo(content, userID, hostName, isBase64);
 		} catch (error) {
 			console.error('Error fetching content:', error);
-			return `Error fetching content: ${error.message}`;
+			return `vless://${userID}@${hostName}:443?encryption=none&security=tls&sni=${hostName}&fp=randomized&type=ws&host=${hostName}&path=%2F%3Fed%3D2048#${hostName}`;
 		}
 	}
 }
